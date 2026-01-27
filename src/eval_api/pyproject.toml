@@ -1,0 +1,16 @@
+[project]
+name = "translation-eval-api"
+version = "0.1.0"
+description = "Offline Translation Eval API"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn>=0.30",
+  "transformers>=4.40",
+  "sentencepiece>=0.2",
+  "torch>=2.2",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
