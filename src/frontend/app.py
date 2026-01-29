@@ -144,6 +144,10 @@ def init_session_state():
         st.session_state.last_latency = None
     if "available_models" not in st.session_state:
         st.session_state.available_models = None
+    if "selected_src_lang" not in st.session_state:
+        st.session_state.selected_src_lang = "English"
+    if "selected_tgt_lang" not in st.session_state:
+        st.session_state.selected_tgt_lang = "Norwegian Bokmål"
 
 
 def main():
@@ -179,18 +183,21 @@ def main():
 
     def swap_languages():
         """Callback to swap source and target languages."""
-        temp = st.session_state.src_lang
-        st.session_state.src_lang = st.session_state.tgt_lang
-        st.session_state.tgt_lang = temp
+        temp = st.session_state.selected_src_lang
+        st.session_state.selected_src_lang = st.session_state.selected_tgt_lang
+        st.session_state.selected_tgt_lang = temp
 
     with col_src:
         src_lang_name = st.selectbox(
             "Source language",
             options=Language.get_display_names(),
-            index=Language.get_display_names().index("English"),
-            key="src_lang",
+            index=Language.get_display_names().index(st.session_state.selected_src_lang),
+            key="src_lang_widget",
         )
-        src_lang = Language.from_display_name(src_lang_name)
+        # Update the session state when user selects manually
+        if src_lang_name != st.session_state.selected_src_lang:
+            st.session_state.selected_src_lang = src_lang_name
+        src_lang = Language.from_display_name(st.session_state.selected_src_lang)
 
     with col_swap:
         st.markdown("<br>", unsafe_allow_html=True)
@@ -200,10 +207,13 @@ def main():
         tgt_lang_name = st.selectbox(
             "Target language",
             options=Language.get_display_names(),
-            index=Language.get_display_names().index("Norwegian Bokmål"),
-            key="tgt_lang",
+            index=Language.get_display_names().index(st.session_state.selected_tgt_lang),
+            key="tgt_lang_widget",
         )
-        tgt_lang = Language.from_display_name(tgt_lang_name)
+        # Update the session state when user selects manually
+        if tgt_lang_name != st.session_state.selected_tgt_lang:
+            st.session_state.selected_tgt_lang = tgt_lang_name
+        tgt_lang = Language.from_display_name(st.session_state.selected_tgt_lang)
     
     # input/output areas
     col_input, col_output = st.columns(2)
@@ -273,7 +283,7 @@ def main():
 
                 st.session_state.translation_result = response.translated_value
                 st.session_state.last_latency = response.latency
-                # No need for st.rerun() - Streamlit will auto-update on next interaction
+                st.rerun()
 
             except requests.RequestException as e:
                 st.error(f"Translation failed: {e}")
