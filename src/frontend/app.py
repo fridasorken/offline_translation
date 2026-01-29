@@ -15,7 +15,7 @@ TRANSLATE_ENDPOINT = "/translate"
 
 class Language(Enum):
     """Supported languages with their codes and display names."""
-    NORWEGIAN_BOKMAL = ("no", "Norwegian Bokmål")
+    NORWEGIAN_BOKMAL = ("nob", "Norwegian Bokmål")
     ENGLISH = ("en", "English")
     
     @property
@@ -73,11 +73,20 @@ class TranslationResponse:
     model_id: Optional[str] = None
 
 
-# update based on actual available models, or get from elsewhere in the program?
-AVAILABLE_MODELS = [
-    "translation-model-1",
-    "translation-model-2",
-]
+def fetch_available_models() -> list[str]:
+    """
+    Fetch available models from the backend API.
+    Falls back to empty list if API is unavailable.
+    """
+    try:
+        url = f"{API_BASE_URL}/models"
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        return [model["model_id"] for model in data.get("models", [])]
+    except requests.RequestException as e:
+        st.warning(f"Could not fetch models from API: {e}")
+        return []
 
 
 def translate_text(request: TranslationRequest) -> TranslationResponse:
@@ -95,9 +104,12 @@ def translate_text(request: TranslationRequest) -> TranslationResponse:
     response.raise_for_status()
     
     data = response.json()
+    # backend returns latency_ms, convert to seconds
+    latency_ms = data.get("latency_ms", 0)
+    latency_seconds = latency_ms / 1000.0
     return TranslationResponse(
         translated_value=data.get("translated_value", ""),
-        latency=float(data.get("latency", 0)),
+        latency=latency_seconds,
         src_lang=data.get("src_lang"),
         tgt_lang=data.get("tgt_lang"),
         source=data.get("source"),
@@ -130,24 +142,47 @@ def init_session_state():
         st.session_state.translation_result = None
     if "last_latency" not in st.session_state:
         st.session_state.last_latency = None
+    if "available_models" not in st.session_state:
+        st.session_state.available_models = None
 
 
 def main():
-    
+
     init_session_state()
-    
+
+    # fetch available models from backend if not using mock
+    if not USE_MOCK and st.session_state.available_models is None:
+        with st.spinner("Loading available models..."):
+            st.session_state.available_models = fetch_available_models()
+
+    # determine which models to show
+    if USE_MOCK:
+        available_models = ["mock-model"]
+    else:
+        available_models = st.session_state.available_models or []
+
+    if not available_models:
+        st.error("No translation models available. Please check the backend configuration.")
+        return
+
     # model selection
     col_model, col_spacer = st.columns([2, 3])
     with col_model:
         selected_model = st.selectbox(
             "Model",
-            options=AVAILABLE_MODELS,
+            options=available_models,
             index=0,
         )
     
     # language selector
     col_src, col_swap, col_tgt = st.columns([2, 1, 2])
-    
+
+    def swap_languages():
+        """Callback to swap source and target languages."""
+        temp = st.session_state.src_lang
+        st.session_state.src_lang = st.session_state.tgt_lang
+        st.session_state.tgt_lang = temp
+
     with col_src:
         src_lang_name = st.selectbox(
             "Source language",
@@ -156,16 +191,11 @@ def main():
             key="src_lang",
         )
         src_lang = Language.from_display_name(src_lang_name)
-    
+
     with col_swap:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("⇄ Swap", use_container_width=True):
-            current_src = st.session_state.get("src_lang", "English")
-            current_tgt = st.session_state.get("tgt_lang", "Norwegian Bokmål")
-            st.session_state.src_lang = current_tgt
-            st.session_state.tgt_lang = current_src
-            st.rerun()
-    
+        st.button("⇄ Swap", use_container_width=True, on_click=swap_languages)
+
     with col_tgt:
         tgt_lang_name = st.selectbox(
             "Target language",
@@ -233,18 +263,18 @@ def main():
             source=source_text.strip(),
             model_id=selected_model,
         )
-        
+
         with st.spinner("Translating..."):
             try:
                 if USE_MOCK:
                     response = mock_translate(request)
                 else:
                     response = translate_text(request)
-                
+
                 st.session_state.translation_result = response.translated_value
                 st.session_state.last_latency = response.latency
-                st.rerun()
-                
+                # No need for st.rerun() - Streamlit will auto-update on next interaction
+
             except requests.RequestException as e:
                 st.error(f"Translation failed: {e}")
             except Exception as e:
