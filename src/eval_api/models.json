@@ -1,0 +1,18 @@
+  {
+    "opus-mt-en-gmq": {
+      "adapter": "transformers",
+      "model_path": "Helsinki-NLP/opus-mt-en-gmq",
+      "supported_pairs": [
+        [
+          "en",
+          "nob"
+        ],
+        [
+          "en",
+          "nno"
+        ]
+      ],
+      "device": "cpu",
+      "local_files_only": false
+    }
+  }
