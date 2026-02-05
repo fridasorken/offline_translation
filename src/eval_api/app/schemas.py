@@ -50,6 +50,7 @@ class EvaluateResponse(BaseModel):
     results: list[EvaluateItemResult]
     aggregates: dict[str, float] = Field(default_factory=dict)
     average_latency_ms: float = Field(ge=0)
+    baseline_rss_mb: Optional[float] = Field(default=None, ge=0)
 
 
 class ModelInfo(BaseModel):

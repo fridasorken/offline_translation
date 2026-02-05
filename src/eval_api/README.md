@@ -162,14 +162,15 @@ export COMET_NUM_WORKERS=1
 
 ## Resource profiling
 
-Resource profiling can be toggled and tuned via env vars:
+Resource profiling is always on for `/evaluate`, but you can tune it via env vars:
 
 ```bash
-export EVAL_PROFILE_RESOURCES=true
 export EVAL_MEM_INTERVAL=0.1
 export EVAL_MEM_BACKEND=psutil
 export EVAL_WARMUP_ITEMS=1
 ```
+
+Translation is run in a separate process so COMET/metrics do not affect CPU/RAM numbers.
 
 If `COMET_MODEL_NAME` or `COMET_KIWI_MODEL_NAME` points at a local checkpoint path, that file will be loaded directly.
 
