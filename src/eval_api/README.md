@@ -148,6 +148,23 @@ Response:
 Notes:
 - If `metrics` is omitted, the API computes `bleu`, `chrf`, `ter`, and `comet`.
 - `cometkiwi` can be requested explicitly for reference-free scoring.
+- `latency_ms` is translation-only. The full `/evaluate` request takes longer when metrics are enabled.
+
+## Metrics reported and how we compute them
+
+Translation metrics:
+- `bleu`, `chrf`, `ter` are sentence-level scores from `sacrebleu` (computed on the model output vs. reference).
+- `comet` uses COMET reference-based scoring on the model output vs. reference.
+- `cometkiwi` uses COMET reference-free scoring on the model output (no reference required).
+
+Resource metrics (translation-only):
+- `latency_ms` is wall-clock time for translation in the isolated worker (does not include metric computation).
+- `cpu_percent_per_core` is computed from CPU time deltas: `(user + system CPU seconds) / wall_seconds / logical_cores * 100`.
+- `ram_mean_mb` and `ram_peak_mb` are the mean/peak of sampled RSS during translation, minus the pre-translation baseline RSS.
+- `baseline_rss_mb` is the RSS right after the model is loaded in the worker (idle footprint).
+
+Aggregates:
+- For each metric above, we report `mean`, `median`, and `stdev` across the batch.
 
 ## COMET configuration
 
