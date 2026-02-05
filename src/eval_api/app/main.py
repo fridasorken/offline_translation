@@ -45,7 +45,7 @@ app = FastAPI(title="Offline Translation Eval API", version="0.1.0", lifespan=li
 metrics_engine = MetricsEngine()
 
 
-def _cpu_percent_per_core(start_cpu: psutil._common.pcputimes, end_cpu: psutil._common.pcputimes, wall: float) -> float:
+def _cpu_percent_per_core(start_cpu: object, end_cpu: object, wall: float) -> float:
     """Estimate CPU usage over the full translation window (per logical core)."""
     if wall <= 0:
         return 0.0
