@@ -3,9 +3,10 @@ import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from .registry import ModelRegistry
-from .schemas import TranslateRequest, TranslateResponse
+from .schemas import TranslateRequest, TranslateResponse, ModelsListResponse, ModelInfo
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,6 +25,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Offline Translation Eval API", version="0.1.0", lifespan=lifespan)
+
+# CORS middleware to allow frontend access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # in production, restrict to specific origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.post("/translate", response_model=TranslateResponse)
@@ -61,3 +71,22 @@ def translate(request: TranslateRequest) -> TranslateResponse:
         translated_value=translated,
         latency_ms=latency_ms,
     )
+
+
+@app.get("/models", response_model=ModelsListResponse)
+def list_models() -> ModelsListResponse:
+    """List all available translation models and their supported language pairs."""
+    registry: ModelRegistry = app.state.registry
+
+    models_info = []
+    for model_id in registry.list_models():
+        config = registry.get_config(model_id)
+        models_info.append(
+            ModelInfo(
+                model_id=config.model_id,
+                adapter=config.adapter,
+                supported_pairs=list(config.supported_pairs),
+            )
+        )
+
+    return ModelsListResponse(models=models_info)
