@@ -56,7 +56,9 @@ API docs are available at `/docs`.
   "src_lang": "no",
   "tgt_lang": "en",
   "source": "Hold posisjon ved broen. Ingen fiende i sikte.",
-  "model_id": "translation-model-1"
+  "model_id": "translation-model-1",
+  "reference": "Hold position at the bridge. No enemy in sight.",
+  "metrics": ["bleu", "chrf", "ter"]
 }
 ```
 
@@ -66,9 +68,18 @@ Response:
 {
   "model_id": "translation-model-1",
   "translated_value": "Hold position at the bridge. No enemy in sight.",
-  "latency_ms": 147
+  "latency_ms": 147,
+  "metrics": {
+    "bleu": 100.0,
+    "chrf": 100.0,
+    "ter": 0.0
+  }
 }
 ```
+
+Notes:
+- Metrics are only computed when `reference` or `references` are provided.
+- If `metrics` is omitted, the API computes all default metrics (`bleu`, `chrf`, `ter`).
 
 ## Quick test with a Hugging Face model download
 

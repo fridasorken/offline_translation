@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from .metrics import MetricsEngine
 from .registry import ModelRegistry
 from .schemas import TranslateRequest, TranslateResponse, ModelsListResponse, ModelInfo
 
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Offline Translation Eval API", version="0.1.0", lifespan=lifespan)
+metrics_engine = MetricsEngine()
 
 # CORS middleware to allow frontend access
 app.add_middleware(
@@ -58,6 +60,17 @@ def translate(request: TranslateRequest) -> TranslateResponse:
         raise HTTPException(status_code=500, detail="translation failed")
     latency_ms = int((time.perf_counter() - start) * 1000)
 
+    references: list[str] = []
+    if request.reference:
+        references.append(request.reference)
+    if request.references:
+        references.extend(request.references)
+
+    try:
+        metrics = metrics_engine.compute(translated, references, request.metrics)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     logger.info(
         "translate model_id=%s src=%s tgt=%s latency_ms=%d",
         request.model_id,
@@ -70,6 +83,7 @@ def translate(request: TranslateRequest) -> TranslateResponse:
         model_id=request.model_id,
         translated_value=translated,
         latency_ms=latency_ms,
+        metrics=metrics,
     )
 
 
