@@ -112,8 +112,9 @@ def _isolated_translate_worker(payload: dict, queue: mp.Queue) -> None:
         items = payload["items"]
 
         if EVAL_WARMUP_ITEMS > 0 and items:
-            # Warm up once in the worker so timing/allocations are stable.
-            _translate_with_resources(adapter, src_lang, tgt_lang, items[0]["source"])
+            # Warm up using the first N items so timing/allocations are stable.
+            for warmup_item in items[:EVAL_WARMUP_ITEMS]:
+                _translate_with_resources(adapter, src_lang, tgt_lang, warmup_item["source"])
 
         # Baseline is measured inside the worker before any metrics are loaded.
         process = psutil.Process(os.getpid())

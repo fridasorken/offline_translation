@@ -140,7 +140,8 @@ Response:
     "ram_peak_mb_median": 1275.9,
     "ram_peak_mb_stdev": 0.0
   },
-  "average_latency_ms": 147.0
+  "average_latency_ms": 147.0,
+  "baseline_rss_mb": 1234.5
 }
 ```
 
