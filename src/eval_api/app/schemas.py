@@ -38,6 +38,9 @@ class EvaluateItemResult(BaseModel):
     latency_ms: int = Field(ge=0)
     metrics: dict[str, float] = Field(default_factory=dict)
     item_id: Optional[NonEmptyStr] = None
+    cpu_percent_per_core: Optional[float] = Field(default=None, ge=0)
+    ram_mean_mb: Optional[float] = Field(default=None, ge=0)
+    ram_peak_mb: Optional[float] = Field(default=None, ge=0)
 
 
 class EvaluateResponse(BaseModel):

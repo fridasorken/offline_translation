@@ -106,6 +106,9 @@ Response:
       "reference": "Hold position at the bridge. No enemy in sight.",
       "translated_value": "Hold position at the bridge. No enemy in sight.",
       "latency_ms": 147,
+      "cpu_percent_per_core": 42.1,
+      "ram_mean_mb": 1250.4,
+      "ram_peak_mb": 1275.9,
       "metrics": {
         "bleu": 100.0,
         "chrf": 100.0,
@@ -126,7 +129,16 @@ Response:
     "ter_stdev": 0.0,
     "comet_mean": 1.0,
     "comet_median": 1.0,
-    "comet_stdev": 0.0
+    "comet_stdev": 0.0,
+    "cpu_percent_per_core_mean": 42.1,
+    "cpu_percent_per_core_median": 42.1,
+    "cpu_percent_per_core_stdev": 0.0,
+    "ram_mean_mb_mean": 1250.4,
+    "ram_mean_mb_median": 1250.4,
+    "ram_mean_mb_stdev": 0.0,
+    "ram_peak_mb_mean": 1275.9,
+    "ram_peak_mb_median": 1275.9,
+    "ram_peak_mb_stdev": 0.0
   },
   "average_latency_ms": 147.0
 }
@@ -146,6 +158,16 @@ export COMET_KIWI_MODEL_NAME="Unbabel/wmt22-cometkiwi-da"
 export COMET_BATCH_SIZE=8
 export COMET_GPUS=0
 export COMET_NUM_WORKERS=1
+```
+
+## Resource profiling
+
+Resource profiling can be toggled and tuned via env vars:
+
+```bash
+export EVAL_PROFILE_RESOURCES=true
+export EVAL_MEM_INTERVAL=0.1
+export EVAL_MEM_BACKEND=psutil
 ```
 
 If `COMET_MODEL_NAME` or `COMET_KIWI_MODEL_NAME` points at a local checkpoint path, that file will be loaded directly.
