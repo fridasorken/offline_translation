@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 EVAL_PROFILE_RESOURCES = os.getenv("EVAL_PROFILE_RESOURCES", "true").lower() == "true"
 EVAL_MEM_INTERVAL = float(os.getenv("EVAL_MEM_INTERVAL", "0.1"))
 EVAL_MEM_BACKEND = os.getenv("EVAL_MEM_BACKEND", "psutil")
+EVAL_WARMUP_ITEMS = int(os.getenv("EVAL_WARMUP_ITEMS", "1"))
 
 
 @asynccontextmanager
@@ -160,7 +161,21 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
     metric_buckets: dict[str, list[float]] = {}
     latency_values: list[int] = []
 
-    for item in request.items:
+    for index, item in enumerate(request.items):
+        if index < EVAL_WARMUP_ITEMS:
+            # Warm up caches/allocators by running the item once without recording stats,
+            # then evaluate it normally so the first item still has metrics.
+            try:
+                _translate_with_resources(
+                    adapter,
+                    request.src_lang,
+                    request.tgt_lang,
+                    item.source,
+                )
+            except Exception:
+                logger.exception("Warmup translation failed for model_id=%s", request.model_id)
+                raise HTTPException(status_code=500, detail="translation failed")
+
         if not item.reference and any(metric in REFERENCE_METRICS for metric in selected_metrics):
             raise HTTPException(
                 status_code=400,
