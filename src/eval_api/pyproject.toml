@@ -10,6 +10,7 @@ dependencies = [
   "sentencepiece>=0.2",
   "torch>=2.2",
   "sacrebleu>=2.4",
+  "unbabel-comet>=2.2",
 ]
 
 [build-system]

@@ -9,15 +9,23 @@ class TranslateRequest(BaseModel):
     tgt_lang: NonEmptyStr
     source: NonEmptyStr
     model_id: NonEmptyStr
-    reference: Optional[NonEmptyStr] = None
-    references: Optional[list[NonEmptyStr]] = None
-    metrics: Optional[list[NonEmptyStr]] = None
 
 
 class TranslateResponse(BaseModel):
     model_id: NonEmptyStr
     translated_value: NonEmptyStr
     latency_ms: int = Field(ge=0)
+
+
+class EvaluateRequest(BaseModel):
+    source: NonEmptyStr
+    hypothesis: NonEmptyStr
+    reference: Optional[NonEmptyStr] = None
+    references: Optional[list[NonEmptyStr]] = None
+    metrics: Optional[list[NonEmptyStr]] = None
+
+
+class EvaluateResponse(BaseModel):
     metrics: dict[str, float] = Field(default_factory=dict)
 
 

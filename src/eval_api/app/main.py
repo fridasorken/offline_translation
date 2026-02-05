@@ -5,9 +5,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from .metrics import MetricsEngine
+from .metrics import MetricsEngine, REFERENCE_METRICS, REFERENCE_FREE_METRICS
 from .registry import ModelRegistry
-from .schemas import TranslateRequest, TranslateResponse, ModelsListResponse, ModelInfo
+from .schemas import (
+    EvaluateRequest,
+    EvaluateResponse,
+    TranslateRequest,
+    TranslateResponse,
+    ModelsListResponse,
+    ModelInfo,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -60,17 +67,6 @@ def translate(request: TranslateRequest) -> TranslateResponse:
         raise HTTPException(status_code=500, detail="translation failed")
     latency_ms = int((time.perf_counter() - start) * 1000)
 
-    references: list[str] = []
-    if request.reference:
-        references.append(request.reference)
-    if request.references:
-        references.extend(request.references)
-
-    try:
-        metrics = metrics_engine.compute(translated, references, request.metrics)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
     logger.info(
         "translate model_id=%s src=%s tgt=%s latency_ms=%d",
         request.model_id,
@@ -83,8 +79,36 @@ def translate(request: TranslateRequest) -> TranslateResponse:
         model_id=request.model_id,
         translated_value=translated,
         latency_ms=latency_ms,
-        metrics=metrics,
     )
+
+
+@app.post("/evaluate", response_model=EvaluateResponse)
+def evaluate(request: EvaluateRequest) -> EvaluateResponse:
+    references: list[str] = []
+    if request.reference:
+        references.append(request.reference)
+    if request.references:
+        references.extend(request.references)
+
+    if request.metrics:
+        selected_metrics = [metric.lower() for metric in request.metrics]
+    else:
+        if references:
+            selected_metrics = list(REFERENCE_METRICS)
+        else:
+            selected_metrics = list(REFERENCE_FREE_METRICS)
+
+    try:
+        metrics = metrics_engine.compute(
+            request.source,
+            request.hypothesis,
+            references,
+            selected_metrics,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return EvaluateResponse(metrics=metrics)
 
 
 @app.get("/models", response_model=ModelsListResponse)

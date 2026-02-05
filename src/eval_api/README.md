@@ -56,9 +56,7 @@ API docs are available at `/docs`.
   "src_lang": "no",
   "tgt_lang": "en",
   "source": "Hold posisjon ved broen. Ingen fiende i sikte.",
-  "model_id": "translation-model-1",
-  "reference": "Hold position at the bridge. No enemy in sight.",
-  "metrics": ["bleu", "chrf", "ter"]
+  "model_id": "translation-model-1"
 }
 ```
 
@@ -68,18 +66,55 @@ Response:
 {
   "model_id": "translation-model-1",
   "translated_value": "Hold position at the bridge. No enemy in sight.",
-  "latency_ms": 147,
+  "latency_ms": 147
+}
+```
+
+## Evaluate endpoint
+
+`/evaluate` scores an MT hypothesis against references (or reference-free metrics).
+
+Request:
+
+```json
+{
+  "source": "Hold posisjon ved broen. Ingen fiende i sikte.",
+  "hypothesis": "Hold position at the bridge. No enemy in sight.",
+  "reference": "Hold position at the bridge. No enemy in sight.",
+  "metrics": ["bleu", "chrf", "ter", "comet"]
+}
+```
+
+Response:
+
+```json
+{
   "metrics": {
     "bleu": 100.0,
     "chrf": 100.0,
-    "ter": 0.0
+    "ter": 0.0,
+    "comet": 1.0
   }
 }
 ```
 
 Notes:
-- Metrics are only computed when `reference` or `references` are provided.
-- If `metrics` is omitted, the API computes all default metrics (`bleu`, `chrf`, `ter`).
+- If `metrics` is omitted and references are provided, the API computes `bleu`, `chrf`, `ter`, and `comet`.
+- If `metrics` is omitted and no reference is provided, the API computes `cometkiwi`.
+- `comet` uses only the first reference when multiple are provided.
+
+## COMET configuration
+
+The COMET models are resolved at runtime. You can override them via env vars:
+
+```bash
+export COMET_MODEL_NAME="Unbabel/wmt22-comet-da"
+export COMET_KIWI_MODEL_NAME="Unbabel/wmt22-cometkiwi-da"
+export COMET_BATCH_SIZE=8
+export COMET_GPUS=0
+```
+
+If `COMET_MODEL_NAME` or `COMET_KIWI_MODEL_NAME` points at a local checkpoint path, that file will be loaded directly.
 
 ## Quick test with a Hugging Face model download
 
