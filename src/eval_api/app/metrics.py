@@ -14,13 +14,21 @@ DEFAULT_COMET_MODEL = os.getenv("COMET_MODEL_NAME", "Unbabel/wmt22-comet-da")
 DEFAULT_COMET_KIWI_MODEL = os.getenv("COMET_KIWI_MODEL_NAME", "Unbabel/wmt22-cometkiwi-da")
 DEFAULT_COMET_BATCH_SIZE = int(os.getenv("COMET_BATCH_SIZE", "8"))
 DEFAULT_COMET_GPUS = int(os.getenv("COMET_GPUS", "0"))
+DEFAULT_COMET_NUM_WORKERS = int(os.getenv("COMET_NUM_WORKERS", "1"))
 
 
 class CometScorer:
-    def __init__(self, model_name_or_path: str, batch_size: int, gpus: int) -> None:
+    def __init__(
+        self,
+        model_name_or_path: str,
+        batch_size: int,
+        gpus: int,
+        num_workers: int,
+    ) -> None:
         self.model_name_or_path = model_name_or_path
         self.batch_size = batch_size
         self.gpus = gpus
+        self.num_workers = num_workers
         self._model = None
 
     def _load(self) -> None:
@@ -39,13 +47,23 @@ class CometScorer:
     def score_reference(self, source: str, hypothesis: str, reference: str) -> float:
         self._load()
         data = [{"src": source, "mt": hypothesis, "ref": reference}]
-        output = self._model.predict(data, batch_size=self.batch_size, gpus=self.gpus)
+        output = self._model.predict(
+            data,
+            batch_size=self.batch_size,
+            gpus=self.gpus,
+            num_workers=self.num_workers,
+        )
         return float(output.scores[0])
 
     def score_reference_free(self, source: str, hypothesis: str) -> float:
         self._load()
         data = [{"src": source, "mt": hypothesis}]
-        output = self._model.predict(data, batch_size=self.batch_size, gpus=self.gpus)
+        output = self._model.predict(
+            data,
+            batch_size=self.batch_size,
+            gpus=self.gpus,
+            num_workers=self.num_workers,
+        )
         return float(output.scores[0])
 
 
@@ -56,12 +74,23 @@ class MetricsEngine:
         cometkiwi_model: str = DEFAULT_COMET_KIWI_MODEL,
         comet_batch_size: int = DEFAULT_COMET_BATCH_SIZE,
         comet_gpus: int = DEFAULT_COMET_GPUS,
+        comet_num_workers: int = DEFAULT_COMET_NUM_WORKERS,
     ) -> None:
-        self._bleu = BLEU()
+        self._bleu = BLEU(effective_order=True)
         self._chrf = CHRF()
         self._ter = TER()
-        self._comet = CometScorer(comet_model, comet_batch_size, comet_gpus)
-        self._cometkiwi = CometScorer(cometkiwi_model, comet_batch_size, comet_gpus)
+        self._comet = CometScorer(
+            comet_model,
+            comet_batch_size,
+            comet_gpus,
+            comet_num_workers,
+        )
+        self._cometkiwi = CometScorer(
+            cometkiwi_model,
+            comet_batch_size,
+            comet_gpus,
+            comet_num_workers,
+        )
 
     def compute(
         self,

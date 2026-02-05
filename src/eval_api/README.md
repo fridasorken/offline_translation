@@ -137,6 +137,7 @@ export COMET_MODEL_NAME="Unbabel/wmt22-comet-da"
 export COMET_KIWI_MODEL_NAME="Unbabel/wmt22-cometkiwi-da"
 export COMET_BATCH_SIZE=8
 export COMET_GPUS=0
+export COMET_NUM_WORKERS=1
 ```
 
 If `COMET_MODEL_NAME` or `COMET_KIWI_MODEL_NAME` points at a local checkpoint path, that file will be loaded directly.
