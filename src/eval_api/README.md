@@ -115,10 +115,18 @@ Response:
     }
   ],
   "aggregates": {
-    "bleu": 100.0,
-    "chrf": 100.0,
-    "ter": 0.0,
-    "comet": 1.0
+    "bleu_mean": 100.0,
+    "bleu_median": 100.0,
+    "bleu_stdev": 0.0,
+    "chrf_mean": 100.0,
+    "chrf_median": 100.0,
+    "chrf_stdev": 0.0,
+    "ter_mean": 0.0,
+    "ter_median": 0.0,
+    "ter_stdev": 0.0,
+    "comet_mean": 1.0,
+    "comet_median": 1.0,
+    "comet_stdev": 0.0
   },
   "average_latency_ms": 147.0
 }

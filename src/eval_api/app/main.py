@@ -1,6 +1,6 @@
 import logging
 import time
-from statistics import mean
+from statistics import mean, median, pstdev
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -151,9 +151,11 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
             )
         )
 
-    aggregates = {
-        metric_name: mean(values) for metric_name, values in metric_buckets.items()
-    }
+    aggregates: dict[str, float] = {}
+    for metric_name, values in metric_buckets.items():
+        aggregates[f"{metric_name}_mean"] = mean(values)
+        aggregates[f"{metric_name}_median"] = median(values)
+        aggregates[f"{metric_name}_stdev"] = pstdev(values)
     average_latency_ms = mean(latency_values) if latency_values else 0.0
 
     return EvaluateResponse(
