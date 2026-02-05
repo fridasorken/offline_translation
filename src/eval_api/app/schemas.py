@@ -17,16 +17,36 @@ class TranslateResponse(BaseModel):
     latency_ms: int = Field(ge=0)
 
 
-class EvaluateRequest(BaseModel):
+class EvaluateItem(BaseModel):
     source: NonEmptyStr
-    hypothesis: NonEmptyStr
     reference: Optional[NonEmptyStr] = None
-    references: Optional[list[NonEmptyStr]] = None
+    item_id: Optional[NonEmptyStr] = None
+
+
+class EvaluateRequest(BaseModel):
+    model_id: NonEmptyStr
+    src_lang: NonEmptyStr
+    tgt_lang: NonEmptyStr
+    items: list[EvaluateItem] = Field(min_length=1)
     metrics: Optional[list[NonEmptyStr]] = None
 
 
-class EvaluateResponse(BaseModel):
+class EvaluateItemResult(BaseModel):
+    source: NonEmptyStr
+    reference: Optional[NonEmptyStr] = None
+    translated_value: NonEmptyStr
+    latency_ms: int = Field(ge=0)
     metrics: dict[str, float] = Field(default_factory=dict)
+    item_id: Optional[NonEmptyStr] = None
+
+
+class EvaluateResponse(BaseModel):
+    model_id: NonEmptyStr
+    src_lang: NonEmptyStr
+    tgt_lang: NonEmptyStr
+    results: list[EvaluateItemResult]
+    aggregates: dict[str, float] = Field(default_factory=dict)
+    average_latency_ms: float = Field(ge=0)
 
 
 class ModelInfo(BaseModel):

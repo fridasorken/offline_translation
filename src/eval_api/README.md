@@ -72,16 +72,23 @@ Response:
 
 ## Evaluate endpoint
 
-`/evaluate` scores an MT hypothesis against references (or reference-free metrics).
+`/evaluate` translates a batch of inputs and scores the outputs against references.
 
 Request:
 
 ```json
 {
-  "source": "Hold posisjon ved broen. Ingen fiende i sikte.",
-  "hypothesis": "Hold position at the bridge. No enemy in sight.",
-  "reference": "Hold position at the bridge. No enemy in sight.",
-  "metrics": ["bleu", "chrf", "ter", "comet"]
+  "model_id": "translation-model-1",
+  "src_lang": "no",
+  "tgt_lang": "en",
+  "metrics": ["bleu", "chrf", "ter", "comet"],
+  "items": [
+    {
+      "item_id": "example-1",
+      "source": "Hold posisjon ved broen. Ingen fiende i sikte.",
+      "reference": "Hold position at the bridge. No enemy in sight."
+    }
+  ]
 }
 ```
 
@@ -89,19 +96,37 @@ Response:
 
 ```json
 {
-  "metrics": {
+  "model_id": "translation-model-1",
+  "src_lang": "no",
+  "tgt_lang": "en",
+  "results": [
+    {
+      "item_id": "example-1",
+      "source": "Hold posisjon ved broen. Ingen fiende i sikte.",
+      "reference": "Hold position at the bridge. No enemy in sight.",
+      "translated_value": "Hold position at the bridge. No enemy in sight.",
+      "latency_ms": 147,
+      "metrics": {
+        "bleu": 100.0,
+        "chrf": 100.0,
+        "ter": 0.0,
+        "comet": 1.0
+      }
+    }
+  ],
+  "aggregates": {
     "bleu": 100.0,
     "chrf": 100.0,
     "ter": 0.0,
     "comet": 1.0
-  }
+  },
+  "average_latency_ms": 147.0
 }
 ```
 
 Notes:
-- If `metrics` is omitted and references are provided, the API computes `bleu`, `chrf`, `ter`, and `comet`.
-- If `metrics` is omitted and no reference is provided, the API computes `cometkiwi`.
-- `comet` uses only the first reference when multiple are provided.
+- If `metrics` is omitted, the API computes `bleu`, `chrf`, `ter`, and `comet`.
+- `cometkiwi` can be requested explicitly for reference-free scoring.
 
 ## COMET configuration
 
