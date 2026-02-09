@@ -70,6 +70,128 @@ Response:
 }
 ```
 
+## Evaluate endpoint
+
+`/evaluate` translates a batch of inputs and scores the outputs against references.
+
+Request:
+
+```json
+{
+  "model_id": "translation-model-1",
+  "src_lang": "no",
+  "tgt_lang": "en",
+  "metrics": ["bleu", "chrf", "ter", "comet"],
+  "items": [
+    {
+      "item_id": "example-1",
+      "source": "Hold posisjon ved broen. Ingen fiende i sikte.",
+      "reference": "Hold position at the bridge. No enemy in sight."
+    }
+  ]
+}
+```
+
+Response:
+
+```json
+{
+  "model_id": "translation-model-1",
+  "src_lang": "no",
+  "tgt_lang": "en",
+  "results": [
+    {
+      "item_id": "example-1",
+      "source": "Hold posisjon ved broen. Ingen fiende i sikte.",
+      "reference": "Hold position at the bridge. No enemy in sight.",
+      "translated_value": "Hold position at the bridge. No enemy in sight.",
+      "latency_ms": 147,
+      "cpu_percent_per_core": 42.1,
+      "ram_mean_mb": 1250.4,
+      "ram_peak_mb": 1275.9,
+      "metrics": {
+        "bleu": 100.0,
+        "chrf": 100.0,
+        "ter": 0.0,
+        "comet": 1.0
+      }
+    }
+  ],
+  "aggregates": {
+    "bleu_mean": 100.0,
+    "bleu_median": 100.0,
+    "bleu_stdev": 0.0,
+    "chrf_mean": 100.0,
+    "chrf_median": 100.0,
+    "chrf_stdev": 0.0,
+    "ter_mean": 0.0,
+    "ter_median": 0.0,
+    "ter_stdev": 0.0,
+    "comet_mean": 1.0,
+    "comet_median": 1.0,
+    "comet_stdev": 0.0,
+    "cpu_percent_per_core_mean": 42.1,
+    "cpu_percent_per_core_median": 42.1,
+    "cpu_percent_per_core_stdev": 0.0,
+    "ram_mean_mb_mean": 1250.4,
+    "ram_mean_mb_median": 1250.4,
+    "ram_mean_mb_stdev": 0.0,
+    "ram_peak_mb_mean": 1275.9,
+    "ram_peak_mb_median": 1275.9,
+    "ram_peak_mb_stdev": 0.0
+  },
+  "average_latency_ms": 147.0,
+  "baseline_rss_mb": 1234.5
+}
+```
+
+Notes:
+- If `metrics` is omitted, the API computes `bleu`, `chrf`, `ter`, and `comet`.
+- `cometkiwi` can be requested explicitly for reference-free scoring.
+- `latency_ms` is translation-only. The full `/evaluate` request takes longer when metrics are enabled.
+
+## Metrics reported and how we compute them
+
+Translation metrics:
+- `bleu`, `chrf`, `ter` are sentence-level scores from `sacrebleu` (computed on the model output vs. reference).
+- `comet` uses COMET reference-based scoring on the model output vs. reference.
+- `cometkiwi` uses COMET reference-free scoring on the model output (no reference required).
+
+Resource metrics (translation-only):
+- `latency_ms` is wall-clock time for translation in the isolated worker (does not include metric computation).
+- `cpu_percent_per_core` is computed from CPU time deltas: `(user + system CPU seconds) / wall_seconds / logical_cores * 100`.
+- `ram_mean_mb` and `ram_peak_mb` are the mean/peak of sampled RSS during translation, minus the pre-translation baseline RSS.
+- `baseline_rss_mb` is the RSS right after the model is loaded in the worker (idle footprint).
+
+Aggregates:
+- For each metric above, we report `mean`, `median`, and `stdev` across the batch.
+
+## COMET configuration
+
+The COMET models are resolved at runtime. You can override them via env vars:
+
+```bash
+export COMET_MODEL_NAME="Unbabel/wmt22-comet-da"
+export COMET_KIWI_MODEL_NAME="Unbabel/wmt22-cometkiwi-da"
+export COMET_BATCH_SIZE=8
+export COMET_GPUS=0
+export COMET_NUM_WORKERS=1
+```
+
+## Resource profiling
+
+Resource profiling is always on for `/evaluate`, but you can tune it via env vars:
+
+```bash
+export EVAL_MEM_INTERVAL=0.1
+export EVAL_MEM_BACKEND=psutil
+export EVAL_WARMUP_ITEMS=1
+```
+
+Translation is run in a separate process so COMET/metrics do not affect CPU/RAM numbers.
+
+If `COMET_MODEL_NAME` or `COMET_KIWI_MODEL_NAME` points at a local checkpoint path, that file will be loaded directly.
+
 ## Quick test with a Hugging Face model download
 
 If you want to pull a model directly from Hugging Face once, set `model_path` to a repo id
