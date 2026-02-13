@@ -1,6 +1,6 @@
   {
     "opus-mt-en-gmq": {
-      "adapter": "transformers",
+      "adapter": "opusmt",
       "model_path": "Helsinki-NLP/opus-mt-en-gmq",
       "supported_pairs": [
         ["en", "nob"],
@@ -10,7 +10,7 @@
       "local_files_only": false
     },
       "opus-mt-en-de": {
-      "adapter": "transformers",
+      "adapter": "opusmt",
       "model_path": "Helsinki-NLP/opus-mt-en-de",
       "supported_pairs": [
         ["en", "de"]
@@ -19,7 +19,7 @@
       "local_files_only": false
     },
     "opus-mt-tc-big-en-pt": {
-      "adapter": "transformers",
+      "adapter": "opusmt",
       "model_path": "Helsinki-NLP/opus-mt-tc-big-en-pt",
       "supported_pairs": [
         ["en", "pt"]

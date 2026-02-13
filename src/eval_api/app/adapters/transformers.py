@@ -126,6 +126,9 @@ class NLLBAdapter(TransformersAdapter):
             prior_src_lang = getattr(self.tokenizer, "src_lang")
             self.tokenizer.src_lang = src_lang
 
+        if hasattr(self.tokenizer, "tgt_lang"):
+            prior_tgt_lang = getattr(self.tokenizer, "tgt_lang")
+
         if hasattr(self.tokenizer, "set_tgt_lang_special_tokens"):
             self.tokenizer.set_tgt_lang_special_tokens(tgt_lang)
 
@@ -137,3 +140,32 @@ class NLLBAdapter(TransformersAdapter):
                 logger.debug(f"Found forced_bos_token_id={forced_bos_token_id} from cur_lang_code")
 
         return forced_bos_token_id, prior_src_lang, prior_tgt_lang
+    
+class OpusMTAdapter(TransformersAdapter):
+    def translate(self, src_lang: str, tgt_lang: str, text: str) -> str:
+        """OPUS-MT models require language tags prepended to source text."""
+        tagged_text = f">>{tgt_lang}<< {text}"
+        
+        forced_bos_token_id, prior_src_lang, prior_tgt_lang = self._prepare_language(
+            src_lang,
+            tgt_lang,
+        )
+        try:
+            inputs = self.tokenizer(tagged_text, return_tensors="pt")
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        finally:
+            self._restore_language(prior_src_lang, prior_tgt_lang)
+
+        generate_kwargs = {
+            "num_beams": self.num_beams,
+            "max_new_tokens": self.max_new_tokens,
+            "do_sample": False,
+        }
+        if forced_bos_token_id is not None:
+            generate_kwargs["forced_bos_token_id"] = forced_bos_token_id
+
+        with torch.no_grad():
+            output_tokens = self.model.generate(**inputs, **generate_kwargs)
+
+        translated = self.tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+        return translated

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, Iterable, Optional, Set, Tuple
 
 from .adapters.base import ModelAdapter
-from .adapters.transformers import TransformersAdapter, NLLBAdapter
+from .adapters.transformers import TransformersAdapter, NLLBAdapter, OpusMTAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +98,8 @@ class ModelRegistry:
             return TransformersAdapter(config.model_path, **config.adapter_params)
         elif config.adapter == "nllb":
             return NLLBAdapter(config.model_path, **config.adapter_params)
+        elif config.adapter == "opusmt":
+            return OpusMTAdapter(config.model_path, **config.adapter_params)
         raise ValueError(f"Unsupported adapter: {config.adapter}")
 
     @staticmethod
@@ -132,7 +134,7 @@ class ModelRegistry:
             raise ValueError("model_path must be a string")
 
         local_files_only = bool(adapter_params.get("local_files_only", True))
-        if adapter_name in ("transformers", "nllb"):
+        if adapter_name in ("transformers", "nllb", "opusmt"):
             candidate = Path(model_path_raw)
             if not candidate.is_absolute():
                 candidate = (BASE_DIR / candidate).resolve()
