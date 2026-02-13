@@ -15,6 +15,7 @@ class TranslateResponse(BaseModel):
     model_id: NonEmptyStr
     translated_value: NonEmptyStr
     latency_ms: int = Field(ge=0)
+    model_was_warm: bool = Field(default=True, description="True if model was already loaded, False if cold start")
 
 
 class EvaluateItem(BaseModel):

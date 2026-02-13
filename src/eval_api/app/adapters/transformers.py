@@ -1,4 +1,5 @@
 import logging
+import threading
 from typing import Optional
 
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
@@ -43,31 +44,35 @@ class TransformersAdapter(ModelAdapter):
         )
         self.model.to(self.device)
         self.model.eval()
+        # Thread safety: protect tokenizer state mutations during concurrent requests
+        self._lock = threading.Lock()
 
     def translate(self, src_lang: str, tgt_lang: str, text: str) -> str:
-        forced_bos_token_id, prior_src_lang, prior_tgt_lang = self._prepare_language(
-            src_lang,
-            tgt_lang,
-        )
-        try:
-            inputs = self.tokenizer(text, return_tensors="pt")
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
-        finally:
-            self._restore_language(prior_src_lang, prior_tgt_lang)
+        # Acquire lock to prevent concurrent requests from corrupting tokenizer state
+        with self._lock:
+            forced_bos_token_id, prior_src_lang, prior_tgt_lang = self._prepare_language(
+                src_lang,
+                tgt_lang,
+            )
+            try:
+                inputs = self.tokenizer(text, return_tensors="pt")
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            finally:
+                self._restore_language(prior_src_lang, prior_tgt_lang)
 
-        generate_kwargs = {
-            "num_beams": self.num_beams,
-            "max_new_tokens": self.max_new_tokens,
-            "do_sample": False,
-        }
-        if forced_bos_token_id is not None:
-            generate_kwargs["forced_bos_token_id"] = forced_bos_token_id
+            generate_kwargs = {
+                "num_beams": self.num_beams,
+                "max_new_tokens": self.max_new_tokens,
+                "do_sample": False,
+            }
+            if forced_bos_token_id is not None:
+                generate_kwargs["forced_bos_token_id"] = forced_bos_token_id
 
-        with torch.no_grad():
-            output_tokens = self.model.generate(**inputs, **generate_kwargs)
+            with torch.no_grad():
+                output_tokens = self.model.generate(**inputs, **generate_kwargs)
 
-        translated = self.tokenizer.decode(output_tokens[0], skip_special_tokens=True)
-        return translated
+            translated = self.tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+            return translated
 
     def _prepare_language(
         self,

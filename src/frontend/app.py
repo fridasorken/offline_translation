@@ -68,10 +68,30 @@ class TranslationResponse:
     """Response from the translation API."""
     translated_value: str
     latency: float
+    model_was_warm: bool = True
     src_lang: Optional[str] = None
     tgt_lang: Optional[str] = None
     source: Optional[str] = None
     model_id: Optional[str] = None
+
+
+def wait_for_backend(timeout: int = 60) -> bool:
+    """
+    Poll the backend health endpoint until it's ready or timeout is reached.
+    Returns True if backend is ready, False if timeout.
+    """
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            url = f"{API_BASE_URL}/health"
+            response = requests.get(url, timeout=2)
+            if response.status_code == 200:
+                return True
+        except requests.RequestException:
+            # Backend not ready yet, wait and retry
+            pass
+        time.sleep(1)
+    return False
 
 
 def fetch_available_models() -> dict[str, dict]:
@@ -97,12 +117,22 @@ def fetch_available_models() -> dict[str, dict]:
         return {}
 
 
+def unload_model(model_id: str) -> None:
+    """Unload a model from backend memory to force cold start."""
+    try:
+        url = f"{API_BASE_URL}/models/{model_id}/unload"
+        response = requests.post(url, timeout=5)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        st.warning(f"Could not unload model: {e}")
+
+
 def translate_text(request: TranslationRequest) -> TranslationResponse:
     """
     Send translation request to the API.
     """
     url = f"{API_BASE_URL}{TRANSLATE_ENDPOINT}"
-    
+
     response = requests.post(
         url,
         json=request.to_dict(),
@@ -110,7 +140,7 @@ def translate_text(request: TranslationRequest) -> TranslationResponse:
         timeout=30,
     )
     response.raise_for_status()
-    
+
     data = response.json()
     # backend returns latency_ms, convert to seconds
     latency_ms = data.get("latency_ms", 0)
@@ -118,6 +148,7 @@ def translate_text(request: TranslationRequest) -> TranslationResponse:
     return TranslationResponse(
         translated_value=data.get("translated_value", ""),
         latency=latency_seconds,
+        model_was_warm=data.get("model_was_warm", True),
         src_lang=data.get("src_lang"),
         tgt_lang=data.get("tgt_lang"),
         source=data.get("source"),
@@ -133,10 +164,11 @@ def mock_translate(request: TranslationRequest) -> TranslationResponse:
     import random
     simulated_latency = random.uniform(0.1, 0.5)
     time.sleep(simulated_latency)
-    
+
     return TranslationResponse(
         translated_value=f"[mock translation of: {request.source}]",
         latency=simulated_latency,
+        model_was_warm=True,
         src_lang=request.src_lang,
         tgt_lang=request.tgt_lang,
         source=request.source,
@@ -150,6 +182,18 @@ def init_session_state():
         st.session_state.translation_result = None
     if "last_latency" not in st.session_state:
         st.session_state.last_latency = None
+    if "last_was_warm" not in st.session_state:
+        st.session_state.last_was_warm = None
+    if "last_word_count" not in st.session_state:
+        st.session_state.last_word_count = None
+    if "cold_latency" not in st.session_state:
+        st.session_state.cold_latency = None
+    if "warm_latency" not in st.session_state:
+        st.session_state.warm_latency = None
+    if "show_comparison" not in st.session_state:
+        st.session_state.show_comparison = False
+    if "benchmark_mode" not in st.session_state:
+        st.session_state.benchmark_mode = True
     if "available_models" not in st.session_state:
         st.session_state.available_models = None
     if "selected_src_lang" not in st.session_state:
@@ -201,8 +245,12 @@ def main():
 
     init_session_state()
 
-    # fetch available models from backend if not using mock
+    # wait for backend, fetch available models if not using mock
     if not USE_MOCK and st.session_state.available_models is None:
+        with st.spinner("Waiting for backend..."):
+            if not wait_for_backend(timeout=120):
+                st.error("Backend is not responding. Please ensure the backend service is running.")
+                st.stop()
         with st.spinner("Loading available models..."):
             st.session_state.available_models = fetch_available_models()
 
@@ -218,8 +266,8 @@ def main():
 
     model_ids = list(available_models_dict.keys())
 
-    # model selection
-    col_model, col_spacer = st.columns([2, 3])
+    # model selection and benchmark mode
+    col_model, col_benchmark = st.columns([2, 3])
     with col_model:
         selected_model = st.selectbox(
             "Model",
@@ -334,9 +382,9 @@ def main():
                 label_visibility="collapsed",
             )
     
-    # translate button, latency display
-    col_btn, col_latency = st.columns([1, 2])
-    
+    # translate button and metrics display
+    col_btn = st.columns(1)[0]
+
     with col_btn:
         translate_clicked = st.button(
             "Translate",
@@ -344,15 +392,57 @@ def main():
             use_container_width=True,
             disabled=not source_text.strip(),
         )
-    
-    with col_latency:
-        if st.session_state.last_latency is not None:
-            latency_ms = st.session_state.last_latency * 1000
-            st.metric(
-                label="API latency",
-                value=f"{latency_ms:.1f} ms",
-            )
-    
+
+    # Display performance metrics (cold vs warm comparison for research)
+    if st.session_state.last_latency is not None:
+        st.divider()
+        st.subheader("Metrics")
+
+        # Show cold vs warm comparison only if we just did both measurements
+        if st.session_state.show_comparison and st.session_state.cold_latency is not None and st.session_state.warm_latency is not None:
+            # st.divider()
+            # st.subheader("Warmup impact")
+
+            comparison_cols = st.columns(2)
+
+            with comparison_cols[0]:
+                cold_ms = st.session_state.cold_latency * 1000
+                if st.session_state.last_word_count and st.session_state.cold_latency > 0:
+                    cold_wps = st.session_state.last_word_count / st.session_state.cold_latency
+                    st.metric(
+                        label="Cold Start",
+                        value=f"{cold_ms:.1f} ms",
+                        delta=f"{cold_wps:.2f} WPS",
+                    )
+                else:
+                    st.metric(
+                        label="Cold Start",
+                        value=f"{cold_ms:.1f} ms",
+                    )
+
+            with comparison_cols[1]:
+                warm_ms = st.session_state.warm_latency * 1000
+                if st.session_state.last_word_count and st.session_state.warm_latency > 0:
+                    warm_wps = st.session_state.last_word_count / st.session_state.warm_latency
+                    speedup = st.session_state.cold_latency / st.session_state.warm_latency if st.session_state.warm_latency > 0 else 0
+                    st.metric(
+                        label="Warm Start",
+                        value=f"{warm_ms:.1f} ms",
+                        delta=f"{warm_wps:.2f} WPS ({speedup:.1f}x faster)",
+                    )
+                else:
+                    st.metric(
+                        label="Warm Start",
+                        value=f"{warm_ms:.1f} ms",
+                    )
+
+    with col_benchmark:
+        st.session_state.benchmark_mode = st.checkbox(
+            "Benchmark mode",
+            value=st.session_state.benchmark_mode,
+            help="Unload model before translation to measure cold start vs warm start performance"
+        )
+
     # handle translation
     if translate_clicked and source_text.strip():
         request = TranslationRequest(
@@ -362,15 +452,39 @@ def main():
             model_id=selected_model,
         )
 
+        word_count = len(source_text.strip().split())
+        st.session_state.last_word_count = word_count
+
         with st.spinner("Translating..."):
             try:
-                if USE_MOCK:
-                    response = mock_translate(request)
-                else:
-                    response = translate_text(request)
+                # force cold start if benchamrk mode
+                if st.session_state.benchmark_mode and not USE_MOCK:
+                    # Force cold start
+                    unload_model(selected_model)
 
-                st.session_state.translation_result = response.translated_value
-                st.session_state.last_latency = response.latency
+                    # Cold run
+                    cold_response = translate_text(request)
+                    st.session_state.cold_latency = cold_response.latency
+
+                    # Warm run
+                    warm_response = translate_text(request)
+                    st.session_state.warm_latency = warm_response.latency
+
+                    st.session_state.translation_result = warm_response.translated_value
+                    st.session_state.last_latency = warm_response.latency
+                    st.session_state.last_was_warm = True
+                    st.session_state.show_comparison = True
+
+                else:
+                    # Normal single run
+                    response = translate_text(request) if not USE_MOCK else mock_translate(request)
+
+                    st.session_state.translation_result = response.translated_value
+                    st.session_state.last_latency = response.latency
+                    st.session_state.last_was_warm = response.model_was_warm
+                    st.session_state.warm_latency = response.latency
+                    st.session_state.show_comparison = False
+
                 st.rerun()
 
             except requests.RequestException as e:
