@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, Iterable, Optional, Set, Tuple
 
 from .adapters.base import ModelAdapter
-from .adapters.transformers import TransformersAdapter
+from .adapters.transformers import TransformersAdapter, NLLBAdapter, OpusMTAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,6 @@ class ModelRegistry:
             raise ValueError("models.json must contain an object at the top level")
 
         configs: Dict[str, ModelConfig] = {}
-        adapters: Dict[str, ModelAdapter] = {}
 
         for model_id, raw_config in data.items():
             if not isinstance(raw_config, dict):
@@ -58,7 +57,7 @@ class ModelRegistry:
             supported_pairs = self._parse_supported_pairs(raw_config.get("supported_pairs"))
             model_ref = self._resolve_model_ref(adapter_name, model_path_raw, adapter_params)
 
-            config = ModelConfig(
+            configs[model_id] = ModelConfig(
                 model_id=model_id,
                 adapter=adapter_name,
                 model_path=model_ref,
@@ -66,18 +65,18 @@ class ModelRegistry:
                 adapter_params=adapter_params,
             )
 
-            adapter = self._build_adapter(config)
-            configs[model_id] = config
-            adapters[model_id] = adapter
-
         self._configs = configs
-        self._adapters = adapters
+        self._adapters = {}   # clear any old cache
 
     def get_adapter(self, model_id: str) -> ModelAdapter:
-        try:
+        if model_id in self._adapters:
             return self._adapters[model_id]
-        except KeyError as exc:
-            raise KeyError(f"Unknown model_id: {model_id}") from exc
+
+        config = self.get_config(model_id)
+        adapter = self._build_adapter(config)
+        self._adapters[model_id] = adapter
+        return adapter
+
 
     def get_config(self, model_id: str) -> ModelConfig:
         try:
@@ -97,6 +96,10 @@ class ModelRegistry:
     def _build_adapter(self, config: ModelConfig) -> ModelAdapter:
         if config.adapter == "transformers":
             return TransformersAdapter(config.model_path, **config.adapter_params)
+        elif config.adapter == "nllb":
+            return NLLBAdapter(config.model_path, **config.adapter_params)
+        elif config.adapter == "opusmt":
+            return OpusMTAdapter(config.model_path, **config.adapter_params)
         raise ValueError(f"Unsupported adapter: {config.adapter}")
 
     @staticmethod
@@ -131,7 +134,7 @@ class ModelRegistry:
             raise ValueError("model_path must be a string")
 
         local_files_only = bool(adapter_params.get("local_files_only", True))
-        if adapter_name == "transformers":
+        if adapter_name in ("transformers", "nllb", "opusmt"):
             candidate = Path(model_path_raw)
             if not candidate.is_absolute():
                 candidate = (BASE_DIR / candidate).resolve()

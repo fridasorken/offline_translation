@@ -42,6 +42,8 @@ If you want to use a different config path, set:
 export MODELS_CONFIG_PATH=./models.json
 ```
 
+When adding a model that has specific configuration requirements, other than what is supplied by the `transformers` adapter, you might need to create a subclass of the `TransformersAdapter` class in `transformers.py` and add it in the functions `_build_adapter` and `_resolve_model_ref` in `registry.py`.
+
 ## Run
 
 ```bash
