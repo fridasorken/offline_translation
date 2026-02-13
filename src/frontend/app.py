@@ -413,10 +413,11 @@ def main():
                         label="Cold Start",
                         value=f"{cold_ms:.1f} ms",
                         delta=f"{cold_wps:.2f} WPS",
+                        delta_color="off",
                     )
                 else:
                     st.metric(
-                        label="Cold Start",
+                        label="Cold start",
                         value=f"{cold_ms:.1f} ms",
                     )
 
@@ -426,7 +427,7 @@ def main():
                     warm_wps = st.session_state.last_word_count / st.session_state.warm_latency
                     speedup = st.session_state.cold_latency / st.session_state.warm_latency if st.session_state.warm_latency > 0 else 0
                     st.metric(
-                        label="Warm Start",
+                        label="Warm start",
                         value=f"{warm_ms:.1f} ms",
                         delta=f"{warm_wps:.2f} WPS ({speedup:.1f}x faster)",
                     )
