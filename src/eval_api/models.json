@@ -1,52 +1,62 @@
-  {
-    "opus-mt-en-gmq": {
-      "adapter": "opusmt",
-      "model_path": "Helsinki-NLP/opus-mt-en-gmq",
-      "supported_pairs": [
-        ["en", "nob"],
-        ["en", "nno"]
-      ],
-      "device": "cpu",
-      "local_files_only": false
-    },
-      "opus-mt-en-de": {
-      "adapter": "opusmt",
-      "model_path": "Helsinki-NLP/opus-mt-en-de",
-      "supported_pairs": [
-        ["en", "de"]
-      ],
-      "device": "cpu",
-      "local_files_only": false
-    },
-    "opus-mt-tc-big-en-pt": {
-      "adapter": "opusmt",
-      "model_path": "Helsinki-NLP/opus-mt-tc-big-en-pt",
-      "supported_pairs": [
-        ["en", "pt"]
-      ],
-      "device": "cpu",
-      "local_files_only": false
-    },
-    "m2m-100-418m": {
-      "adapter": "transformers",
-      "model_path": "facebook/m2m100_418M",
-      "supported_pairs": [
-        ["en", "de"],
-        ["en", "no"],
-        ["en", "pt"]
-      ],
-      "device": "cpu",
-      "local_files_only": false
-    },
-    "nllb-200-distilled-600m": {
-      "adapter": "nllb",
-      "model_path": "facebook/nllb-200-distilled-600M",
-      "supported_pairs": [
-        ["eng_Latn", "deu_Latn"],
-        ["eng_Latn", "nob_Latn"],
-        ["eng_Latn", "por_Latn"]
-      ],
-      "device": "cpu",
-      "local_files_only": false
-    }
+{
+  "opus-mt-en-gmq": {
+    "adapter": "opusmt",
+    "model_path": "Helsinki-NLP/opus-mt-en-gmq",
+    "supported_pairs": [
+      ["en", "nob"],
+      ["en", "nno"]
+    ],
+    "device": "cpu",
+    "local_files_only": false
+  },
+  "opus-mt-tc-big-en-gmq": {
+    "adapter": "opusmt",
+    "model_path": "Helsinki-NLP/opus-mt-tc-big-en-gmq",
+    "supported_pairs": [
+      ["en", "nob"],
+      ["en", "nno"]
+    ],
+    "device": "cpu",
+    "local_files_only": false
+  },
+  "opus-mt-en-de": {
+    "adapter": "opusmt",
+    "model_path": "Helsinki-NLP/opus-mt-en-de",
+    "supported_pairs": [
+      ["en", "de"]
+    ],
+    "device": "cpu",
+    "local_files_only": false
+  },
+  "opus-mt-tc-big-en-pt": {
+    "adapter": "opusmt",
+    "model_path": "Helsinki-NLP/opus-mt-tc-big-en-pt",
+    "supported_pairs": [
+      ["en", "pt"]
+    ],
+    "device": "cpu",
+    "local_files_only": false
+  },
+  "m2m-100-418m": {
+    "adapter": "transformers",
+    "model_path": "facebook/m2m100_418M",
+    "supported_pairs": [
+      ["en", "de"],
+      ["en", "no"],
+      ["en", "pt"]
+    ],
+    "device": "cpu",
+    "local_files_only": false
+  },
+  "nllb-200-distilled-600m": {
+    "adapter": "nllb",
+    "model_path": "facebook/nllb-200-distilled-600M",
+    "supported_pairs": [
+      ["eng_Latn", "deu_Latn"],
+      ["eng_Latn", "nob_Latn"],
+      ["eng_Latn", "por_Latn"]
+    ],
+    "device": "cpu",
+    "local_files_only": false
   }
+}
