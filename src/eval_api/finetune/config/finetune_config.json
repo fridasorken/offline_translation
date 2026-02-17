@@ -1,0 +1,48 @@
+{
+  "ids": {
+    "batch_id": 1
+  },
+  "paths": {
+    "raw_generated_jsonl": "../benchmarks/data/generated_en_nob_military.jsonl",
+    "fixed_ids_jsonl": "./data/generated_en_nob_military_fixed_ids.jsonl",
+    "malformed_lines_log": "./results/generated_en_nob_military_malformed_lines.txt",
+    "train_ready_jsonl": "./data/generated_en_nob_military_train_ready.jsonl",
+    "train_ready_report_json": "./results/generated_en_nob_military_train_ready_report.json",
+    "hf_train_jsonl": "./data/opus_train.jsonl",
+    "hf_eval_jsonl": "./data/opus_eval.jsonl",
+    "hf_test_jsonl": "./data/opus_test.jsonl",
+    "split_report_json": "./results/opus_split_report.json",
+    "training_output_dir": "./outputs/opus_tc_big_en_nob_ft",
+    "best_model_dir": "./outputs/opus_tc_big_en_nob_ft_best",
+    "training_metrics_json": "./results/opus_tc_big_en_nob_ft_metrics.json"
+  },
+  "dataset": {
+    "random_seed": 42,
+    "eval_ratio": 0.05,
+    "test_ratio": 0.0,
+    "max_source_length": 192,
+    "max_target_length": 192
+  },
+  "training": {
+    "model_ref": "Helsinki-NLP/opus-mt-tc-big-en-gmq",
+    "source_lang": "en",
+    "target_lang": "nob",
+    "local_files_only": false,
+    "learning_rate": 3e-05,
+    "num_train_epochs": 3,
+    "per_device_train_batch_size": 8,
+    "per_device_eval_batch_size": 8,
+    "gradient_accumulation_steps": 2,
+    "warmup_ratio": 0.05,
+    "weight_decay": 0.01,
+    "logging_steps": 50,
+    "eval_steps": 200,
+    "save_steps": 200,
+    "save_total_limit": 2,
+    "num_beams_eval": 4,
+    "fp16": false,
+    "bf16": false,
+    "gradient_checkpointing": true,
+    "dataloader_num_workers": 0
+  }
+}
