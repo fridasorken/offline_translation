@@ -12,6 +12,15 @@ API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 USE_MOCK = os.getenv("USE_MOCK", "true").lower() == "true"
 TRANSLATE_ENDPOINT = "/translate"
 
+# Fallback model used for UI rendering when backend is not yet reachable.
+# The real model list is fetched once the backend responds.
+DEFAULT_FALLBACK_MODELS: dict[str, dict] = {
+    "opus-mt-en-gmq": {
+        "adapter": "transformers",
+        "supported_pairs": [("en", "nob"), ("en", "nno")],
+    }
+}
+
 
 class Language(Enum):
     """Supported languages with their codes and display names."""
@@ -94,11 +103,12 @@ def wait_for_backend(timeout: int = 60) -> bool:
     return False
 
 
-def fetch_available_models() -> dict[str, dict]:
+def fetch_available_models(silent: bool = False) -> dict[str, dict]:
     """
     Fetch available models from the backend API.
     Returns dict mapping model_id to full model info including supported pairs.
     Falls back to empty dict if API is unavailable.
+    Pass silent=True to suppress the warning (e.g. during background load attempts).
     """
     try:
         url = f"{API_BASE_URL}/models"
@@ -113,7 +123,8 @@ def fetch_available_models() -> dict[str, dict]:
             for model in data.get("models", [])
         }
     except requests.RequestException as e:
-        st.warning(f"Could not fetch models from API: {e}")
+        if not silent:
+            st.warning(f"Could not fetch models from API: {e}")
         return {}
 
 
@@ -245,24 +256,23 @@ def main():
 
     init_session_state()
 
-    # wait for backend, fetch available models if not using mock
-    if not USE_MOCK and st.session_state.available_models is None:
-        with st.spinner("Waiting for backend..."):
-            if not wait_for_backend(timeout=120):
-                st.error("Backend is not responding. Please ensure the backend service is running.")
-                st.stop()
-        with st.spinner("Loading available models..."):
-            st.session_state.available_models = fetch_available_models()
+    # Attempt a quick, non-blocking model fetch on every load until it succeeds.
+    # This means the UI renders immediately; the translate button handles waiting.
+    if not USE_MOCK and not st.session_state.available_models:
+        st.session_state.available_models = fetch_available_models(silent=True)
 
-    # determine which models to show
+    # Determine which models to show, falling back to a placeholder so the
+    # UI always renders even when the backend hasn't started yet.
     if USE_MOCK:
         available_models_dict = {"mock-model": {"adapter": "mock", "supported_pairs": [("en", "nob"), ("nob", "en")]}}
+    elif st.session_state.available_models:
+        available_models_dict = st.session_state.available_models
     else:
-        available_models_dict = st.session_state.available_models or {}
+        available_models_dict = DEFAULT_FALLBACK_MODELS
 
-    if not available_models_dict:
-        st.error("No translation models available. Please check the backend configuration.")
-        return
+    backend_offline = not USE_MOCK and not st.session_state.available_models
+    if backend_offline:
+        st.info("Backend not connected yet. Press Translate when ready — the app will wait for it automatically.")
 
     model_ids = list(available_models_dict.keys())
 
@@ -446,22 +456,40 @@ def main():
 
     # handle translation
     if translate_clicked and source_text.strip():
-        request = TranslationRequest(
-            src_lang=src_lang_code,
-            tgt_lang=tgt_lang_code,
-            source=source_text.strip(),
-            model_id=selected_model,
-        )
-
         word_count = len(source_text.strip().split())
         st.session_state.last_word_count = word_count
 
-        with st.spinner("Translating..."):
-            try:
-                # force cold start if benchamrk mode
+        try:
+            # Step 1: ensure backend is reachable before doing anything
+            if not USE_MOCK:
+                with st.spinner("Waiting for backend..."):
+                    if not wait_for_backend(timeout=120):
+                        st.error("Backend is not responding. Please ensure the backend service is running.")
+                        st.stop()
+
+                # If we were using the fallback model list, now fetch the real one
+                if not st.session_state.available_models:
+                    st.session_state.available_models = fetch_available_models()
+
+            # Resolve model_id: if we just fetched real models, pick the first one
+            # (the UI was showing the fallback placeholder, so selected_model may be stale)
+            if backend_offline and st.session_state.available_models:
+                resolved_model_id = list(st.session_state.available_models.keys())[0]
+            else:
+                resolved_model_id = selected_model
+
+            request = TranslationRequest(
+                src_lang=src_lang_code,
+                tgt_lang=tgt_lang_code,
+                source=source_text.strip(),
+                model_id=resolved_model_id,
+            )
+
+            # Step 2: translate
+            with st.spinner("Translating..."):
+                # force cold start if benchmark mode
                 if st.session_state.benchmark_mode and not USE_MOCK:
-                    # Force cold start
-                    unload_model(selected_model)
+                    unload_model(resolved_model_id)
 
                     # Cold run
                     cold_response = translate_text(request)
@@ -486,12 +514,12 @@ def main():
                     st.session_state.warm_latency = response.latency
                     st.session_state.show_comparison = False
 
-                st.rerun()
+            st.rerun()
 
-            except requests.RequestException as e:
-                st.error(f"Translation failed: {e}")
-            except Exception as e:
-                st.error(f"error: {e}")
+        except requests.RequestException as e:
+            st.error(f"Translation failed: {e}")
+        except Exception as e:
+            st.error(f"error: {e}")
 
 
 if __name__ == "__main__":
