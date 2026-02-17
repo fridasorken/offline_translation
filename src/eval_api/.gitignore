@@ -25,3 +25,5 @@ dist/
 
 # OS junk
 .DS_Store
+
+finetune_bundle.zip
