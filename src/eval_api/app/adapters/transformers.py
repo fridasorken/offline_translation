@@ -105,6 +105,10 @@ class TransformersAdapter(ModelAdapter):
         if prior_tgt_lang is not _UNSET and hasattr(self.tokenizer, "tgt_lang"):
             self.tokenizer.tgt_lang = prior_tgt_lang
 
+    def count_tokens(self, text: str) -> int:
+        """Return the number of tokens in text"""
+        return len(self.tokenizer.encode(text, add_special_tokens=False))
+
     @staticmethod
     def _resolve_device(device: str) -> torch.device:
         if device == "cuda" and not torch.cuda.is_available():
