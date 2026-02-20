@@ -19,6 +19,7 @@ class TransformersAdapter(ModelAdapter):
         max_new_tokens: int = 256,
         forced_bos_token_id: Optional[int] = None,
         local_files_only: bool = True,
+        num_threads: Optional[int] = None,
     ) -> None:
         self.model_path = model_path
         self.device = self._resolve_device(device)
@@ -26,6 +27,10 @@ class TransformersAdapter(ModelAdapter):
         self.max_new_tokens = max_new_tokens
         self.forced_bos_token_id = forced_bos_token_id
         self.local_files_only = local_files_only
+        self.num_threads = num_threads
+
+        if self.num_threads is not None:
+            torch.set_num_threads(self.num_threads)
 
         logger.info("Loading transformers model from %s on %s", model_path, self.device)
         self.tokenizer = AutoTokenizer.from_pretrained(
