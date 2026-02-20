@@ -2,13 +2,15 @@ import streamlit as st
 import requests
 import time
 import os
+import pandas as pd
+import io
 from typing import Optional
 from dataclasses import dataclass
 from enum import Enum
 
 # Page config must be first Streamlit command
 st.set_page_config(
-    page_title="Translation App",
+    page_title="frontend",
     layout="centered",
     initial_sidebar_state="collapsed"
 )
@@ -221,6 +223,10 @@ def init_session_state():
         st.session_state.selected_tgt_lang = None
     if "models_preloaded" not in st.session_state:
         st.session_state.models_preloaded = False
+    if "csv_results" not in st.session_state:
+        st.session_state.csv_results = None
+    if "csv_translation_started" not in st.session_state:
+        st.session_state.csv_translation_started = False
 
 
 @st.cache_data
@@ -401,6 +407,120 @@ def get_language_options_for_model(model_id: str, supported_pairs: tuple) -> tup
     return src_lang_codes, tgt_lang_codes, src_lang_options, tgt_lang_options
 
 
+def batch_translate_csv(
+    df: pd.DataFrame,
+    text_column: str,
+    src_lang: str,
+    tgt_lang: str,
+    model_id: str,
+    benchmark_mode: bool,
+    progress_bar
+) -> pd.DataFrame:
+    """
+    Batch translate a CSV file with progress tracking.
+
+    Args:
+        df: Input DataFrame
+        text_column: Column name containing text to translate
+        src_lang: Source language code
+        tgt_lang: Target language code
+        model_id: Model ID to use for translation
+        benchmark_mode: If True, do cold+warm translation per row
+        progress_bar: Streamlit progress bar object
+
+    Returns:
+        DataFrame with translation results
+    """
+    results = []
+    total_rows = len(df)
+
+    for idx, row in df.iterrows():
+        source_text = str(row[text_column])
+
+        if not source_text or source_text == "nan":
+            # Skip empty rows
+            result_row = {
+                "source": source_text,
+                "translation": "",
+            }
+            if benchmark_mode:
+                result_row["t_cold_ms"] = None
+                result_row["t_warm_ms"] = None
+            else:
+                result_row["latency_ms"] = None
+            results.append(result_row)
+            progress_bar.progress((idx + 1) / total_rows)
+            continue
+
+        request = TranslationRequest(
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            source=source_text,
+            model_id=model_id,
+        )
+
+        try:
+            if benchmark_mode:
+                # Unload model for cold start
+                if not USE_MOCK:
+                    unload_model(model_id)
+
+                # Cold translation
+                cold_response = translate_text(request) if not USE_MOCK else mock_translate(request)
+
+                # Warm translation
+                warm_response = translate_text(request) if not USE_MOCK else mock_translate(request)
+
+                result_row = {
+                    "source": source_text,
+                    "translation": warm_response.translated_value,
+                    "t_cold_ms": cold_response.latency * 1000,
+                    "t_warm_ms": warm_response.latency * 1000,
+                }
+            else:
+                # Normal single translation
+                response = translate_text(request) if not USE_MOCK else mock_translate(request)
+
+                result_row = {
+                    "source": source_text,
+                    "translation": response.translated_value,
+                    "latency_ms": response.latency * 1000,
+                }
+
+            results.append(result_row)
+
+        except Exception as e:
+            # Handle translation errors
+            result_row = {
+                "source": source_text,
+                "translation": f"ERROR: {str(e)}",
+            }
+            if benchmark_mode:
+                result_row["t_cold_ms"] = None
+                result_row["t_warm_ms"] = None
+            else:
+                result_row["latency_ms"] = None
+            results.append(result_row)
+
+        # Update progress
+        progress_bar.progress((idx + 1) / total_rows)
+
+    # Create results DataFrame
+    results_df = pd.DataFrame(results)
+
+    # Merge with original dataframe (keep all original columns)
+    final_df = df.copy()
+    final_df["translation"] = results_df["translation"]
+
+    if benchmark_mode:
+        final_df["t_cold_ms"] = results_df["t_cold_ms"]
+        final_df["t_warm_ms"] = results_df["t_warm_ms"]
+    else:
+        final_df["latency_ms"] = results_df["latency_ms"]
+
+    return final_df
+
+
 def main():
 
     init_session_state()
@@ -434,134 +554,292 @@ def main():
 
     # Now all caches are warm - UI will render instantly from here on
 
-    # model selection
-    selected_model = st.selectbox(
-        "Model",
-        options=model_ids,
-        index=0,
-        key="selected_model",
-    )
+    # Create tabs for Text, CSV, and Evaluation
+    tab_text, tab_csv, tab_eval = st.tabs(["Text", "CSV", "Evaluation"])
 
-    # get model info and supported languages (cached per model)
-    model_info = available_models_dict[selected_model]
-    supported_pairs_tuple = tuple(model_info.get("supported_pairs", []))
-    src_lang_codes, tgt_lang_codes, src_lang_options, tgt_lang_options = get_language_options_for_model(
-        selected_model, supported_pairs_tuple
-    )
-
-    # Initialize language selections if not set or invalid for current model
-    if st.session_state.selected_src_lang is None or display_name_to_code(st.session_state.selected_src_lang) not in src_lang_codes:
-        st.session_state.selected_src_lang = src_lang_options[0] if src_lang_options else None
-    if st.session_state.selected_tgt_lang is None or display_name_to_code(st.session_state.selected_tgt_lang) not in tgt_lang_codes:
-        st.session_state.selected_tgt_lang = tgt_lang_options[0] if tgt_lang_options else None
-
-    if not src_lang_options or not tgt_lang_options:
-        st.error(f"Model {selected_model} has no supported language pairs.")
-        return
-
-    # language selector
-    col_src, col_swap, col_tgt = st.columns([2, 1, 2])
-
-    def swap_languages():
-        """Callback to swap source and target languages if the pair is valid."""
-        current_src_code = display_name_to_code(st.session_state.selected_src_lang)
-        current_tgt_code = display_name_to_code(st.session_state.selected_tgt_lang)
-
-        # Check if reverse pair is supported
-        if (current_tgt_code, current_src_code) in model_info["supported_pairs"]:
-            st.session_state.selected_src_lang = code_to_display_name(current_tgt_code)
-            st.session_state.selected_tgt_lang = code_to_display_name(current_src_code)
-
-    with col_src:
-        src_lang_index = src_lang_options.index(st.session_state.selected_src_lang) if st.session_state.selected_src_lang in src_lang_options else 0
-        st.selectbox(
-            "Source language",
-            options=src_lang_options,
-            index=src_lang_index,
-            key="src_lang_widget",
-            on_change=lambda: setattr(st.session_state, "selected_src_lang", st.session_state.src_lang_widget)
+    with tab_text:
+        # model selection
+        selected_model = st.selectbox(
+            "Model",
+            options=model_ids,
+            index=0,
+            key="selected_model",
         )
-        src_lang_code = display_name_to_code(st.session_state.selected_src_lang)
 
-    with col_swap:
-        st.markdown("<br>", unsafe_allow_html=True)
-        # Check if reverse pair is valid to enable/disable swap button
-        current_src_code = display_name_to_code(st.session_state.selected_src_lang)
-        current_tgt_code = display_name_to_code(st.session_state.selected_tgt_lang)
-        can_swap = (current_tgt_code, current_src_code) in model_info["supported_pairs"]
-        st.button("⇄ Swap", use_container_width=True, on_click=swap_languages, disabled=not can_swap)
-
-    with col_tgt:
-        # Filter target languages based on selected source language
-        current_src_code = display_name_to_code(st.session_state.selected_src_lang)
-        valid_tgt_codes = get_valid_target_languages(selected_model, supported_pairs_tuple, current_src_code)
-        # Sort target options alphabetically
-        valid_tgt_options = sorted([code_to_display_name(code) for code in valid_tgt_codes])
-
-        if not valid_tgt_options:
-            st.error(f"No target languages available for source language {st.session_state.selected_src_lang}")
-            return
-
-        # Ensure selected target is valid for current source - pick alphabetically first if invalid
-        if st.session_state.selected_tgt_lang not in valid_tgt_options:
-            st.session_state.selected_tgt_lang = valid_tgt_options[0]  # Already sorted alphabetically
-
-        tgt_lang_index = valid_tgt_options.index(st.session_state.selected_tgt_lang) if st.session_state.selected_tgt_lang in valid_tgt_options else 0
-        st.selectbox(
-            "Target language",
-            options=valid_tgt_options,
-            index=tgt_lang_index,
-            key="tgt_lang_widget",
-            on_change=lambda: setattr(st.session_state, "selected_tgt_lang", st.session_state.tgt_lang_widget)
+        # get model info and supported languages (cached per model)
+        model_info = available_models_dict[selected_model]
+        supported_pairs_tuple = tuple(model_info.get("supported_pairs", []))
+        src_lang_codes, tgt_lang_codes, src_lang_options, tgt_lang_options = get_language_options_for_model(
+            selected_model, supported_pairs_tuple
         )
-        tgt_lang_code = display_name_to_code(st.session_state.selected_tgt_lang)
 
-    # Translation UI fragment (isolated reruns for better performance)
-    translation_fragment(src_lang_code, tgt_lang_code, selected_model)
+        # Initialize language selections if not set or invalid for current model
+        if st.session_state.selected_src_lang is None or display_name_to_code(st.session_state.selected_src_lang) not in src_lang_codes:
+            st.session_state.selected_src_lang = src_lang_options[0] if src_lang_options else None
+        if st.session_state.selected_tgt_lang is None or display_name_to_code(st.session_state.selected_tgt_lang) not in tgt_lang_codes:
+            st.session_state.selected_tgt_lang = tgt_lang_options[0] if tgt_lang_options else None
 
-    # Display performance metrics (cold vs warm comparison for research)
-    if st.session_state.last_latency is not None:
+        if not src_lang_options or not tgt_lang_options:
+            st.error(f"Model {selected_model} has no supported language pairs.")
+            st.stop()
+
+        # language selector
+        col_src, col_swap, col_tgt = st.columns([2, 1, 2])
+
+        def swap_languages():
+            """Callback to swap source and target languages if the pair is valid."""
+            current_src_code = display_name_to_code(st.session_state.selected_src_lang)
+            current_tgt_code = display_name_to_code(st.session_state.selected_tgt_lang)
+
+            # Check if reverse pair is supported
+            if (current_tgt_code, current_src_code) in model_info["supported_pairs"]:
+                st.session_state.selected_src_lang = code_to_display_name(current_tgt_code)
+                st.session_state.selected_tgt_lang = code_to_display_name(current_src_code)
+
+        with col_src:
+            src_lang_index = src_lang_options.index(st.session_state.selected_src_lang) if st.session_state.selected_src_lang in src_lang_options else 0
+            st.selectbox(
+                "Source language",
+                options=src_lang_options,
+                index=src_lang_index,
+                key="src_lang_widget",
+                on_change=lambda: setattr(st.session_state, "selected_src_lang", st.session_state.src_lang_widget)
+            )
+            src_lang_code = display_name_to_code(st.session_state.selected_src_lang)
+
+        with col_swap:
+            st.markdown("<br>", unsafe_allow_html=True)
+            # Check if reverse pair is valid to enable/disable swap button
+            current_src_code = display_name_to_code(st.session_state.selected_src_lang)
+            current_tgt_code = display_name_to_code(st.session_state.selected_tgt_lang)
+            can_swap = (current_tgt_code, current_src_code) in model_info["supported_pairs"]
+            st.button("⇄ Swap", use_container_width=True, on_click=swap_languages, disabled=not can_swap)
+
+        with col_tgt:
+            # Filter target languages based on selected source language
+            current_src_code = display_name_to_code(st.session_state.selected_src_lang)
+            valid_tgt_codes = get_valid_target_languages(selected_model, supported_pairs_tuple, current_src_code)
+            # Sort target options alphabetically
+            valid_tgt_options = sorted([code_to_display_name(code) for code in valid_tgt_codes])
+
+            if not valid_tgt_options:
+                st.error(f"No target languages available for source language {st.session_state.selected_src_lang}")
+                st.stop()
+
+            # Ensure selected target is valid for current source - pick alphabetically first if invalid
+            if st.session_state.selected_tgt_lang not in valid_tgt_options:
+                st.session_state.selected_tgt_lang = valid_tgt_options[0]  # Already sorted alphabetically
+
+            tgt_lang_index = valid_tgt_options.index(st.session_state.selected_tgt_lang) if st.session_state.selected_tgt_lang in valid_tgt_options else 0
+            st.selectbox(
+                "Target language",
+                options=valid_tgt_options,
+                index=tgt_lang_index,
+                key="tgt_lang_widget",
+                on_change=lambda: setattr(st.session_state, "selected_tgt_lang", st.session_state.tgt_lang_widget)
+            )
+            tgt_lang_code = display_name_to_code(st.session_state.selected_tgt_lang)
+
+        # Translation UI fragment (isolated reruns for better performance)
+        translation_fragment(src_lang_code, tgt_lang_code, selected_model)
+
+        # Display performance metrics (cold vs warm comparison for research)
+        if st.session_state.last_latency is not None:
+            st.divider()
+            st.subheader("Metrics")
+
+            # Show cold vs warm comparison only if we just did both measurements
+            if st.session_state.show_comparison and st.session_state.cold_latency is not None and st.session_state.warm_latency is not None:
+                # st.divider()
+                # st.subheader("Warmup impact")
+
+                comparison_cols = st.columns(2)
+
+                with comparison_cols[0]:
+                    cold_ms = st.session_state.cold_latency * 1000
+                    if st.session_state.last_word_count and st.session_state.cold_latency > 0:
+                        cold_wps = st.session_state.last_word_count / st.session_state.cold_latency
+                        st.metric(
+                            label="Cold Start",
+                            value=f"{cold_ms:.1f} ms",
+                            delta=f"{cold_wps:.2f} WPS",
+                            delta_color="off",
+                        )
+                    else:
+                        st.metric(
+                            label="Cold start",
+                            value=f"{cold_ms:.1f} ms",
+                        )
+
+                with comparison_cols[1]:
+                    warm_ms = st.session_state.warm_latency * 1000
+                    if st.session_state.last_word_count and st.session_state.warm_latency > 0:
+                        warm_wps = st.session_state.last_word_count / st.session_state.warm_latency
+                        speedup = st.session_state.cold_latency / st.session_state.warm_latency if st.session_state.warm_latency > 0 else 0
+                        st.metric(
+                            label="Warm start",
+                            value=f"{warm_ms:.1f} ms",
+                            delta=f"{warm_wps:.2f} WPS ({speedup:.1f}x faster)",
+                        )
+                    else:
+                        st.metric(
+                            label="Warm Start",
+                            value=f"{warm_ms:.1f} ms",
+                        )
+
+    with tab_csv:
+        # Model selection for CSV
+        selected_model_csv = st.selectbox(
+            "Model",
+            options=model_ids,
+            index=0,
+            key="selected_model_csv",
+        )
+
+        # Get model info for CSV tab
+        model_info_csv = available_models_dict[selected_model_csv]
+        supported_pairs_tuple_csv = tuple(model_info_csv.get("supported_pairs", []))
+        src_lang_codes_csv, tgt_lang_codes_csv, src_lang_options_csv, tgt_lang_options_csv = get_language_options_for_model(
+            selected_model_csv, supported_pairs_tuple_csv
+        )
+
+        # Language selectors for CSV
+        col_src_csv, col_tgt_csv = st.columns(2)
+
+        with col_src_csv:
+            src_lang_csv = st.selectbox(
+                "Source language",
+                options=src_lang_options_csv,
+                index=0,
+                key="src_lang_csv",
+            )
+            src_lang_code_csv = display_name_to_code(src_lang_csv)
+
+        with col_tgt_csv:
+            # Filter valid target languages
+            valid_tgt_codes_csv = get_valid_target_languages(selected_model_csv, supported_pairs_tuple_csv, src_lang_code_csv)
+            valid_tgt_options_csv = sorted([code_to_display_name(code) for code in valid_tgt_codes_csv])
+
+            if valid_tgt_options_csv:
+                tgt_lang_csv = st.selectbox(
+                    "Target language",
+                    options=valid_tgt_options_csv,
+                    index=0,
+                    key="tgt_lang_csv",
+                )
+                tgt_lang_code_csv = display_name_to_code(tgt_lang_csv)
+            else:
+                st.error(f"No target languages available for source language {src_lang_csv}")
+                st.stop()
+
+        # CSV file uploader
         st.divider()
-        st.subheader("Metrics")
+        uploaded_file = st.file_uploader(
+            "Upload CSV file",
+            type=["csv"],
+            help="Upload a CSV file with text to translate. The first column will be translated."
+        )
 
-        # Show cold vs warm comparison only if we just did both measurements
-        if st.session_state.show_comparison and st.session_state.cold_latency is not None and st.session_state.warm_latency is not None:
-            # st.divider()
-            # st.subheader("Warmup impact")
+        if uploaded_file is not None:
+            # Read and preview the CSV
+            try:
+                df = pd.read_csv(uploaded_file)
+                st.write(f"**Preview** ({len(df)} rows):")
+                st.dataframe(df.head(10), use_container_width=True)
 
-            comparison_cols = st.columns(2)
+                # Column selector
+                text_column = st.selectbox(
+                    "Select column to translate",
+                    options=df.columns.tolist(),
+                    index=0,
+                    key="text_column_selector"
+                )
 
-            with comparison_cols[0]:
-                cold_ms = st.session_state.cold_latency * 1000
-                if st.session_state.last_word_count and st.session_state.cold_latency > 0:
-                    cold_wps = st.session_state.last_word_count / st.session_state.cold_latency
-                    st.metric(
-                        label="Cold Start",
-                        value=f"{cold_ms:.1f} ms",
-                        delta=f"{cold_wps:.2f} WPS",
-                        delta_color="off",
-                    )
-                else:
-                    st.metric(
-                        label="Cold start",
-                        value=f"{cold_ms:.1f} ms",
+                # Translate button
+                if st.button("Translate CSV", type="primary", use_container_width=True):
+                    # Perform batch translation
+                    with st.spinner("Translating..."):
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+
+                        try:
+                            # Ensure backend is reachable
+                            if not USE_MOCK:
+                                status_text.text("Waiting for backend...")
+                                if not wait_for_backend(timeout=120):
+                                    st.error("Backend is not responding. Please ensure the backend service is running.")
+                                    st.stop()
+
+                            status_text.text(f"Translating {len(df)} rows...")
+
+                            # Perform batch translation
+                            results_df = batch_translate_csv(
+                                df=df,
+                                text_column=text_column,
+                                src_lang=src_lang_code_csv,
+                                tgt_lang=tgt_lang_code_csv,
+                                model_id=selected_model_csv,
+                                benchmark_mode=st.session_state.benchmark_mode,
+                                progress_bar=progress_bar
+                            )
+
+                            # Store results in session state
+                            st.session_state.csv_results = results_df
+
+                            status_text.text("Translation complete!")
+                            st.success(f"Successfully translated {len(df)} rows!")
+
+                        except Exception as e:
+                            st.error(f"Translation failed: {e}")
+
+                # Display results if available
+                if st.session_state.csv_results is not None:
+                    st.divider()
+                    st.subheader("Translation Results")
+
+                    # Show preview
+                    st.write(f"**Preview** ({len(st.session_state.csv_results)} rows):")
+                    st.dataframe(st.session_state.csv_results.head(20), use_container_width=True)
+
+                    # Download button
+                    csv_buffer = io.StringIO()
+                    st.session_state.csv_results.to_csv(csv_buffer, index=False)
+                    csv_data = csv_buffer.getvalue()
+
+                    st.download_button(
+                        label="Download Translated CSV",
+                        data=csv_data,
+                        file_name="translated_output.csv",
+                        mime="text/csv",
+                        type="primary",
+                        use_container_width=True
                     )
 
-            with comparison_cols[1]:
-                warm_ms = st.session_state.warm_latency * 1000
-                if st.session_state.last_word_count and st.session_state.warm_latency > 0:
-                    warm_wps = st.session_state.last_word_count / st.session_state.warm_latency
-                    speedup = st.session_state.cold_latency / st.session_state.warm_latency if st.session_state.warm_latency > 0 else 0
-                    st.metric(
-                        label="Warm start",
-                        value=f"{warm_ms:.1f} ms",
-                        delta=f"{warm_wps:.2f} WPS ({speedup:.1f}x faster)",
-                    )
-                else:
-                    st.metric(
-                        label="Warm Start",
-                        value=f"{warm_ms:.1f} ms",
-                    )
+                    # Show summary statistics if benchmark mode
+                    if st.session_state.benchmark_mode and "t_cold_ms" in st.session_state.csv_results.columns:
+                        st.divider()
+                        st.subheader("Benchmark Statistics")
+
+                        col1, col2, col3 = st.columns(3)
+
+                        with col1:
+                            avg_cold = st.session_state.csv_results["t_cold_ms"].mean()
+                            st.metric("Avg Cold Start", f"{avg_cold:.1f} ms")
+
+                        with col2:
+                            avg_warm = st.session_state.csv_results["t_warm_ms"].mean()
+                            st.metric("Avg Warm Start", f"{avg_warm:.1f} ms")
+
+                        with col3:
+                            speedup = avg_cold / avg_warm if avg_warm > 0 else 0
+                            st.metric("Avg Speedup", f"{speedup:.2f}x")
+
+            except Exception as e:
+                st.error(f"Error reading CSV file: {e}")
+
+    with tab_eval:
+        st.subheader("Translation Evaluation")
+        st.info("Evaluation metrics and tools will be available here.")
 
     # Benchmark mode toggle (placed at the bottom)
     st.divider()
