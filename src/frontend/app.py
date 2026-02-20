@@ -6,10 +6,17 @@ from typing import Optional
 from dataclasses import dataclass
 from enum import Enum
 
+# Page config must be first Streamlit command
+st.set_page_config(
+    page_title="Translation App",
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
+
 
 # Configuration
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
-USE_MOCK = os.getenv("USE_MOCK", "true").lower() == "true"
+USE_MOCK = os.getenv("USE_MOCK", "false").lower() == "true"
 TRANSLATE_ENDPOINT = "/translate"
 
 # Fallback model used for UI rendering when backend is not yet reachable.
@@ -103,6 +110,7 @@ def wait_for_backend(timeout: int = 60) -> bool:
     return False
 
 
+@st.cache_data(ttl=300, show_spinner=False)  # Cache for 5 minutes
 def fetch_available_models(silent: bool = False) -> dict[str, dict]:
     """
     Fetch available models from the backend API.
@@ -211,45 +219,186 @@ def init_session_state():
         st.session_state.selected_src_lang = None
     if "selected_tgt_lang" not in st.session_state:
         st.session_state.selected_tgt_lang = None
+    if "models_preloaded" not in st.session_state:
+        st.session_state.models_preloaded = False
 
 
-def get_supported_languages(model_info: dict) -> tuple[list[str], list[str]]:
+@st.cache_data
+def get_supported_languages(model_id: str, supported_pairs: tuple) -> tuple[list[str], list[str]]:
     """
     Extract supported source and target languages from model info.
     Returns (source_langs, target_langs) as lists of language codes.
+    Uses tuple for hashable cache key.
     """
-    supported_pairs = model_info.get("supported_pairs", [])
     src_langs = sorted(set(pair[0] for pair in supported_pairs))
     tgt_langs = sorted(set(pair[1] for pair in supported_pairs))
     return src_langs, tgt_langs
 
 
-def get_valid_target_languages(model_info: dict, src_lang_code: str) -> list[str]:
+@st.cache_data
+def get_valid_target_languages(model_id: str, supported_pairs: tuple, src_lang_code: str) -> list[str]:
     """
     Get valid target languages for a given source language.
+    Uses tuple for hashable cache key.
     """
-    supported_pairs = model_info.get("supported_pairs", [])
     return sorted(set(pair[1] for pair in supported_pairs if pair[0] == src_lang_code))
 
 
-def get_valid_source_languages(model_info: dict, tgt_lang_code: str) -> list[str]:
+@st.cache_data
+def get_valid_source_languages(model_id: str, supported_pairs: tuple, tgt_lang_code: str) -> list[str]:
     """
     Get valid source languages for a given target language.
+    Uses tuple for hashable cache key.
     """
-    supported_pairs = model_info.get("supported_pairs", [])
     return sorted(set(pair[0] for pair in supported_pairs if pair[1] == tgt_lang_code))
 
 
+@st.cache_data
 def code_to_display_name(lang_code: str) -> str:
     """Convert language code to display name, fallback to code if not found."""
     lang = Language.from_code(lang_code)
     return lang.display_name if lang else lang_code
 
 
+@st.cache_data
 def display_name_to_code(display_name: str) -> str:
     """Convert display name to language code, fallback to display name if not found."""
     lang = Language.from_display_name(display_name)
     return lang.code if lang else display_name
+
+
+@st.fragment
+def translation_fragment(src_lang_code: str, tgt_lang_code: str, selected_model: str):
+    """
+    Fragment for translation input/output UI.
+    This isolates reruns to just this section when text changes.
+    """
+    # input/output areas
+    col_input, col_output = st.columns(2)
+
+    with col_input:
+        source_text = st.text_area(
+            "Source text",
+            height=200,
+            placeholder="Enter text to translate...",
+            label_visibility="collapsed",
+            key="source_text_input",
+        )
+
+    with col_output:
+        output_placeholder = st.empty()
+
+        if st.session_state.translation_result:
+            output_placeholder.text_area(
+                "Translation output",
+                value=st.session_state.translation_result,
+                height=200,
+                disabled=True,
+                label_visibility="collapsed",
+            )
+        else:
+            output_placeholder.text_area(
+                "Translation output",
+                value="",
+                height=200,
+                disabled=True,
+                label_visibility="collapsed",
+            )
+
+    # translate button (always enabled)
+    col_btn = st.columns(1)[0]
+
+    with col_btn:
+        translate_clicked = st.button(
+            "Translate",
+            type="primary",
+            use_container_width=True,
+        )
+
+    # handle translation
+    if translate_clicked and source_text.strip():
+        word_count = len(source_text.strip().split())
+        st.session_state.last_word_count = word_count
+
+        try:
+            # Step 1: ensure backend is reachable before doing anything
+            if not USE_MOCK:
+                with st.spinner("Waiting for backend..."):
+                    if not wait_for_backend(timeout=120):
+                        st.error("Backend is not responding. Please ensure the backend service is running.")
+                        st.stop()
+
+                # If we were using the fallback model list, now fetch the real one
+                if not st.session_state.available_models:
+                    st.session_state.available_models = fetch_available_models()
+
+            # Resolve model_id
+            backend_offline = not USE_MOCK and not st.session_state.available_models
+            if backend_offline and st.session_state.available_models:
+                resolved_model_id = list(st.session_state.available_models.keys())[0]
+            else:
+                resolved_model_id = selected_model
+
+            request = TranslationRequest(
+                src_lang=src_lang_code,
+                tgt_lang=tgt_lang_code,
+                source=source_text.strip(),
+                model_id=resolved_model_id,
+            )
+
+            # Step 2: translate
+            with st.spinner("Translating..."):
+                # force cold start if benchmark mode
+                if st.session_state.benchmark_mode and not USE_MOCK:
+                    unload_model(resolved_model_id)
+
+                    # Cold run
+                    cold_response = translate_text(request)
+                    st.session_state.cold_latency = cold_response.latency
+
+                    # Warm run
+                    warm_response = translate_text(request)
+                    st.session_state.warm_latency = warm_response.latency
+
+                    st.session_state.translation_result = warm_response.translated_value
+                    st.session_state.last_latency = warm_response.latency
+                    st.session_state.last_was_warm = True
+                    st.session_state.show_comparison = True
+
+                else:
+                    # Normal single run
+                    response = translate_text(request) if not USE_MOCK else mock_translate(request)
+
+                    st.session_state.translation_result = response.translated_value
+                    st.session_state.last_latency = response.latency
+                    st.session_state.last_was_warm = response.model_was_warm
+                    st.session_state.warm_latency = response.latency
+                    st.session_state.show_comparison = False
+
+            st.rerun(scope="fragment")
+
+        except requests.RequestException as e:
+            st.error(f"Translation failed: {e}")
+        except Exception as e:
+            st.error(f"error: {e}")
+
+
+@st.cache_data
+def get_language_options_for_model(model_id: str, supported_pairs: tuple) -> tuple[list[str], list[str], list[str], list[str]]:
+    """
+    Get all language options for a model, fully processed and ready for UI.
+    Returns: (src_lang_codes, tgt_lang_codes, src_lang_options, tgt_lang_options)
+    Cached per model to avoid recomputation on every render.
+    """
+    # Extract codes
+    src_lang_codes = sorted(set(pair[0] for pair in supported_pairs))
+    tgt_lang_codes = sorted(set(pair[1] for pair in supported_pairs))
+
+    # Convert to display names
+    src_lang_options = sorted([code_to_display_name(code) for code in src_lang_codes])
+    tgt_lang_options = sorted([code_to_display_name(code) for code in tgt_lang_codes])
+
+    return src_lang_codes, tgt_lang_codes, src_lang_options, tgt_lang_options
 
 
 def main():
@@ -271,28 +420,34 @@ def main():
         available_models_dict = DEFAULT_FALLBACK_MODELS
 
     backend_offline = not USE_MOCK and not st.session_state.available_models
-    if backend_offline:
-        st.info("Backend not connected yet. Press Translate when ready — the app will wait for it automatically.")
 
     model_ids = list(available_models_dict.keys())
 
-    # model selection and benchmark mode
-    col_model, col_benchmark = st.columns([2, 3])
-    with col_model:
-        selected_model = st.selectbox(
-            "Model",
-            options=model_ids,
-            index=0,
-            key="selected_model",
-        )
+    # Preload language options for all models to warm the cache (only on first load)
+    # This ensures the UI renders smoothly without delays between widgets
+    if not st.session_state.models_preloaded:
+        with st.spinner("Loading models..."):
+            for model_id in model_ids:
+                supported_pairs = tuple(available_models_dict[model_id].get("supported_pairs", []))
+                get_language_options_for_model(model_id, supported_pairs)
+            st.session_state.models_preloaded = True
 
-    # get model info and supported languages
+    # Now all caches are warm - UI will render instantly from here on
+
+    # model selection
+    selected_model = st.selectbox(
+        "Model",
+        options=model_ids,
+        index=0,
+        key="selected_model",
+    )
+
+    # get model info and supported languages (cached per model)
     model_info = available_models_dict[selected_model]
-    src_lang_codes, tgt_lang_codes = get_supported_languages(model_info)
-
-    # convert to display names and sort alphabetically
-    src_lang_options = sorted([code_to_display_name(code) for code in src_lang_codes])
-    tgt_lang_options = sorted([code_to_display_name(code) for code in tgt_lang_codes])
+    supported_pairs_tuple = tuple(model_info.get("supported_pairs", []))
+    src_lang_codes, tgt_lang_codes, src_lang_options, tgt_lang_options = get_language_options_for_model(
+        selected_model, supported_pairs_tuple
+    )
 
     # Initialize language selections if not set or invalid for current model
     if st.session_state.selected_src_lang is None or display_name_to_code(st.session_state.selected_src_lang) not in src_lang_codes:
@@ -339,7 +494,7 @@ def main():
     with col_tgt:
         # Filter target languages based on selected source language
         current_src_code = display_name_to_code(st.session_state.selected_src_lang)
-        valid_tgt_codes = get_valid_target_languages(model_info, current_src_code)
+        valid_tgt_codes = get_valid_target_languages(selected_model, supported_pairs_tuple, current_src_code)
         # Sort target options alphabetically
         valid_tgt_options = sorted([code_to_display_name(code) for code in valid_tgt_codes])
 
@@ -360,48 +515,9 @@ def main():
             on_change=lambda: setattr(st.session_state, "selected_tgt_lang", st.session_state.tgt_lang_widget)
         )
         tgt_lang_code = display_name_to_code(st.session_state.selected_tgt_lang)
-    
-    # input/output areas
-    col_input, col_output = st.columns(2)
-    
-    with col_input:
-        source_text = st.text_area(
-            "Source text",
-            height=200,
-            placeholder="Enter text to translate...",
-            label_visibility="collapsed",
-        )
-    
-    with col_output:
-        output_placeholder = st.empty()
-        
-        if st.session_state.translation_result:
-            output_placeholder.text_area(
-                "Translation output",
-                value=st.session_state.translation_result,
-                height=200,
-                disabled=True,
-                label_visibility="collapsed",
-            )
-        else:
-            output_placeholder.text_area(
-                "Translation output",
-                value="",
-                height=200,
-                disabled=True,
-                label_visibility="collapsed",
-            )
-    
-    # translate button and metrics display
-    col_btn = st.columns(1)[0]
 
-    with col_btn:
-        translate_clicked = st.button(
-            "Translate",
-            type="primary",
-            use_container_width=True,
-            disabled=not source_text.strip(),
-        )
+    # Translation UI fragment (isolated reruns for better performance)
+    translation_fragment(src_lang_code, tgt_lang_code, selected_model)
 
     # Display performance metrics (cold vs warm comparison for research)
     if st.session_state.last_latency is not None:
@@ -447,79 +563,13 @@ def main():
                         value=f"{warm_ms:.1f} ms",
                     )
 
-    with col_benchmark:
-        st.session_state.benchmark_mode = st.checkbox(
-            "Benchmark mode",
-            value=st.session_state.benchmark_mode,
-            help="Unload model before translation to measure cold start vs warm start performance"
-        )
-
-    # handle translation
-    if translate_clicked and source_text.strip():
-        word_count = len(source_text.strip().split())
-        st.session_state.last_word_count = word_count
-
-        try:
-            # Step 1: ensure backend is reachable before doing anything
-            if not USE_MOCK:
-                with st.spinner("Waiting for backend..."):
-                    if not wait_for_backend(timeout=120):
-                        st.error("Backend is not responding. Please ensure the backend service is running.")
-                        st.stop()
-
-                # If we were using the fallback model list, now fetch the real one
-                if not st.session_state.available_models:
-                    st.session_state.available_models = fetch_available_models()
-
-            # Resolve model_id: if we just fetched real models, pick the first one
-            # (the UI was showing the fallback placeholder, so selected_model may be stale)
-            if backend_offline and st.session_state.available_models:
-                resolved_model_id = list(st.session_state.available_models.keys())[0]
-            else:
-                resolved_model_id = selected_model
-
-            request = TranslationRequest(
-                src_lang=src_lang_code,
-                tgt_lang=tgt_lang_code,
-                source=source_text.strip(),
-                model_id=resolved_model_id,
-            )
-
-            # Step 2: translate
-            with st.spinner("Translating..."):
-                # force cold start if benchmark mode
-                if st.session_state.benchmark_mode and not USE_MOCK:
-                    unload_model(resolved_model_id)
-
-                    # Cold run
-                    cold_response = translate_text(request)
-                    st.session_state.cold_latency = cold_response.latency
-
-                    # Warm run
-                    warm_response = translate_text(request)
-                    st.session_state.warm_latency = warm_response.latency
-
-                    st.session_state.translation_result = warm_response.translated_value
-                    st.session_state.last_latency = warm_response.latency
-                    st.session_state.last_was_warm = True
-                    st.session_state.show_comparison = True
-
-                else:
-                    # Normal single run
-                    response = translate_text(request) if not USE_MOCK else mock_translate(request)
-
-                    st.session_state.translation_result = response.translated_value
-                    st.session_state.last_latency = response.latency
-                    st.session_state.last_was_warm = response.model_was_warm
-                    st.session_state.warm_latency = response.latency
-                    st.session_state.show_comparison = False
-
-            st.rerun()
-
-        except requests.RequestException as e:
-            st.error(f"Translation failed: {e}")
-        except Exception as e:
-            st.error(f"error: {e}")
+    # Benchmark mode toggle (placed at the bottom)
+    st.divider()
+    st.session_state.benchmark_mode = st.toggle(
+        "Benchmark mode",
+        value=st.session_state.benchmark_mode,
+        help="Unload model before translation to measure cold start vs warm start performance"
+    )
 
 
 if __name__ == "__main__":
