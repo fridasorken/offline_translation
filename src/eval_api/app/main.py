@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from memory_profiler import memory_usage
+from numpy import percentile
 import psutil
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -403,6 +404,13 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
         aggregates["ctx_switches_involuntary_max"] = max(ctx_switches_involuntary_values)
 
     average_latency_ms = mean(latency_values) if latency_values else 0.0
+
+    if latency_values:
+        aggregates["latency_p50_ms"] = percentile(latency_values, 50)
+        aggregates["latency_p95_ms"] = percentile(latency_values, 95)
+        aggregates["latency_p99_ms"] = percentile(latency_values, 99)
+        aggregates["latency_min_ms"] = min(latency_values)
+        aggregates["latency_max_ms"] = max(latency_values)
 
     return EvaluateResponse(
         model_id=request.model_id,
