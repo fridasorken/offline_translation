@@ -92,7 +92,8 @@ def _translate_with_resources(
     latency_ms = int(wall * 1000)
     output_token_count = adapter.count_tokens(translated)
     total_tokens = input_token_count + output_token_count
-    tokens_per_second = total_tokens / wall if wall > 0 else 0.0
+    total_tokens_per_second = total_tokens / wall if wall > 0 else 0.0
+    output_tokens_per_second = output_token_count / wall if wall > 0 else 0.0
 
     if mem_samples:
         ram_mean = float(mean(mem_samples)) - baseline_rss_mb
@@ -117,7 +118,8 @@ def _translate_with_resources(
         "system_cpu_ms": system_time,
         "input_tokens": input_token_count,
         "output_tokens": output_token_count,
-        "tokens_per_second": tokens_per_second,
+        "total_tokens_per_second": total_tokens_per_second,
+        "output_tokens_per_second": output_tokens_per_second,
         "ctx_switches_involuntary": ctx_switches_involuntary,
     }
 
@@ -165,7 +167,8 @@ def _isolated_translate_worker(payload: dict, queue: mp.Queue) -> None:
                     "system_cpu_ms": detailed_metrics.get("system_cpu_ms"),
                     "input_tokens": detailed_metrics.get("input_tokens"),
                     "output_tokens": detailed_metrics.get("output_tokens"),
-                    "tokens_per_second": detailed_metrics.get("tokens_per_second"),
+                    "total_tokens_per_second": detailed_metrics.get("total_tokens_per_second"),
+                    "output_tokens_per_second": detailed_metrics.get("output_tokens_per_second"),
                     "ctx_switches_involuntary": detailed_metrics.get("ctx_switches_involuntary"),
                 }
             )
@@ -227,7 +230,8 @@ def _run_isolated_translation(
             system_cpu_ms=item.get("system_cpu_ms"),
             input_tokens=item.get("input_tokens"),
             output_tokens=item.get("output_tokens"),
-            tokens_per_second=item.get("tokens_per_second"),
+            total_tokens_per_second=item.get("total_tokens_per_second"),
+            output_tokens_per_second=item.get("output_tokens_per_second"),
             ctx_switches_involuntary=item.get("ctx_switches_involuntary"),
         )
         for item in message.get("results", [])
@@ -363,11 +367,17 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
         aggregates["ram_peak_mb_median"] = median(ram_peak_values)
         aggregates["ram_peak_mb_stdev"] = pstdev(ram_peak_values)
 
-    tps_values = [item.tokens_per_second for item in results if item.tokens_per_second is not None]
-    if tps_values:
-        aggregates["tokens_per_second_mean"] = mean(tps_values)
-        aggregates["tokens_per_second_median"] = median(tps_values)
-        aggregates["tokens_per_second_stdev"] = pstdev(tps_values)
+    total_tps_values = [item.total_tokens_per_second for item in results if item.total_tokens_per_second is not None]
+    if total_tps_values:
+        aggregates["total_tokens_per_secondmean"] = mean(total_tps_values)
+        aggregates["total_tokens_per_second_median"] = median(total_tps_values)
+        aggregates["total_tokens_per_second_stdev"] = pstdev(total_tps_values)
+
+    output_tps_values = [item.output_tokens_per_second for item in results if item.output_tokens_per_second is not None]
+    if output_tps_values:
+        aggregates["output_tokens_per_second_mean"] = mean(output_tps_values)
+        aggregates["output_tokens_per_second_median"] = median(output_tps_values)
+        aggregates["output_tokens_per_second_stdev"] = pstdev(output_tps_values)
 
     ctx_switches_involuntary_values = [item.ctx_switches_involuntary for item in results if item.ctx_switches_involuntary is not None]
     if ctx_switches_involuntary_values:

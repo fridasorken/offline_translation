@@ -45,7 +45,8 @@ class EvaluateItemResult(BaseModel):
     system_cpu_ms: Optional[float] = Field(default=None, ge=0)
     input_tokens: Optional[int] = Field(default=None, ge=0)
     output_tokens: Optional[int] = Field(default=None, ge=0)
-    tokens_per_second: Optional[float] = Field(default=None, ge=0)
+    total_tokens_per_second: Optional[float] = Field(default=None, ge=0)
+    output_tokens_per_second: Optional[float] = Field(default=None, ge=0)
     ctx_switches_involuntary: Optional[int] = Field(default=None, ge=0)
 
 
