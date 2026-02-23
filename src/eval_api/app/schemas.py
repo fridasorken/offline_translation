@@ -46,7 +46,6 @@ class EvaluateItemResult(BaseModel):
     input_tokens: Optional[int] = Field(default=None, ge=0)
     output_tokens: Optional[int] = Field(default=None, ge=0)
     tokens_per_second: Optional[float] = Field(default=None, ge=0)
-    page_faults_major: Optional[int] = Field(default=None, ge=0)
     ctx_switches_involuntary: Optional[int] = Field(default=None, ge=0)
 
 

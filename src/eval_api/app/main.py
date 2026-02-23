@@ -61,20 +61,6 @@ def _baseline_resource_usage(process: psutil.Process) -> float:
     baseline_rss_mb = process.memory_info().rss / (1024 ** 2)
     return baseline_rss_mb
 
-def _major_pagefault_count(pid: int) -> int | None:
-    """Return major page faults from /proc/<pid>/stat on Linux."""
-    try:
-        with open(f"/proc/{pid}/stat", "r", encoding="utf-8") as handle:
-            stat = handle.read()
-        rparen = stat.rfind(")")
-        if rparen == -1:
-            return None
-        fields = stat[rparen + 2 :].split()
-        major = int(fields[9])
-        return major
-    except Exception:
-        return None
-
 def _translate_with_resources(
     adapter,
     src_lang: str,
@@ -91,7 +77,6 @@ def _translate_with_resources(
 
     start_cpu = process.cpu_times()
     start_ctx = process.num_ctx_switches()
-    start_pf = _major_pagefault_count(os.getpid())
     baseline_rss_mb = process.memory_info().rss / (1024 ** 2)
     start_time = time.perf_counter()
     input_token_count = adapter.count_tokens(text)
@@ -104,7 +89,6 @@ def _translate_with_resources(
     wall = time.perf_counter() - start_time
     end_cpu = process.cpu_times()
     end_ctx = process.num_ctx_switches()
-    end_pf = _major_pagefault_count(os.getpid())
     latency_ms = int(wall * 1000)
     output_token_count = adapter.count_tokens(translated)
     total_tokens = input_token_count + output_token_count
@@ -122,11 +106,6 @@ def _translate_with_resources(
 
     user_time = (end_cpu.user - start_cpu.user) * 1000
     system_time = (end_cpu.system - start_cpu.system) * 1000
-
-    if start_pf and end_pf:
-        page_faults_major = max(0, end_pf - start_pf)
-    else:
-        page_faults_major = None
     
     if start_ctx and end_ctx:
         ctx_switches_involuntary = max(0, end_ctx.involuntary - start_ctx.involuntary)
@@ -139,7 +118,6 @@ def _translate_with_resources(
         "input_tokens": input_token_count,
         "output_tokens": output_token_count,
         "tokens_per_second": tokens_per_second,
-        "page_faults_major": page_faults_major,
         "ctx_switches_involuntary": ctx_switches_involuntary,
     }
 
@@ -188,7 +166,6 @@ def _isolated_translate_worker(payload: dict, queue: mp.Queue) -> None:
                     "input_tokens": detailed_metrics.get("input_tokens"),
                     "output_tokens": detailed_metrics.get("output_tokens"),
                     "tokens_per_second": detailed_metrics.get("tokens_per_second"),
-                    "page_faults_major": detailed_metrics.get("page_faults_major"),
                     "ctx_switches_involuntary": detailed_metrics.get("ctx_switches_involuntary"),
                 }
             )
@@ -251,7 +228,6 @@ def _run_isolated_translation(
             input_tokens=item.get("input_tokens"),
             output_tokens=item.get("output_tokens"),
             tokens_per_second=item.get("tokens_per_second"),
-            page_faults_major=item.get("page_faults_major"),
             ctx_switches_involuntary=item.get("ctx_switches_involuntary"),
         )
         for item in message.get("results", [])
@@ -392,11 +368,6 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
         aggregates["tokens_per_second_mean"] = mean(tps_values)
         aggregates["tokens_per_second_median"] = median(tps_values)
         aggregates["tokens_per_second_stdev"] = pstdev(tps_values)
-
-    page_faults_major_values = [item.page_faults_major for item in results if item.page_faults_major is not None]
-    if page_faults_major_values:
-        aggregates["page_faults_major_total"] = sum(page_faults_major_values)
-        aggregates["page_faults_major_max"] = max(page_faults_major_values)
 
     ctx_switches_involuntary_values = [item.ctx_switches_involuntary for item in results if item.ctx_switches_involuntary is not None]
     if ctx_switches_involuntary_values:
