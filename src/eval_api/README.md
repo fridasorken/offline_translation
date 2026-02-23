@@ -44,13 +44,28 @@ export MODELS_CONFIG_PATH=./models.json
 
 When adding a model that has specific configuration requirements, other than what is supplied by the `transformers` adapter, you might need to create a subclass of the `TransformersAdapter` class in `transformers.py` and add it in the functions `_build_adapter` and `_resolve_model_ref` in `registry.py`.
 
-## Run
+## Run locally
 
 ```bash
 uv run uvicorn app.main:app
 ```
 
 API docs are available at `/docs`.
+
+## Run with Docker
+
+First, make sure Docker is installed locally:
+
+```bash
+docker -v
+```
+
+Then build the Docker image and start the container using Docker Compose in detached mode:
+
+```bash
+docker compose up -d
+```
+
 ## Example request
 
 ```json
@@ -164,9 +179,17 @@ Resource metrics (translation-only):
 - `cpu_percent_per_core` is computed from CPU time deltas: `(user + system CPU seconds) / wall_seconds / logical_cores * 100`.
 - `ram_mean_mb` and `ram_peak_mb` are the mean/peak of sampled RSS during translation, minus the pre-translation baseline RSS.
 - `baseline_rss_mb` is the RSS right after the model is loaded in the worker (idle footprint).
+- `user_cpu_ms` is the time spent by the CPU executing the code (doing inference). On a multicore system, this is the sum of the times spent across all cores, and can therefore exceed wall time.
+- `system_cpu_ms` is the time spent by the CPU in kernel mode, e.g. for I/O operations.
+- `input_tokens` and `output_tokens`  are token counts from the tokenizer.
+- `total_tokens_per_second` is `(input_tokens + output_tokens) / wall time`, i.e. a measurement of the overall throughput. 
+- `output_tokens_per_second` is `output_tokens / wall time`, which is the text generation speed.
+- `ctx_switches_involuntary` is the number of involuntary context switches during translation.
 
 Aggregates:
-- For each metric above, we report `mean`, `median`, and `stdev` across the batch.
+- For each translation quality and resource metric above, we report `mean`, `median`, and `stdev` across the batch.
+- For `ctx_switches_involuntary` we report the sum and max across the batch.
+- For `latency_ms`, we report the average and tail latency (`p50`, `p95` and `p99`) across the batch, as well as `min` and `max`.
 
 ## COMET configuration
 
