@@ -20,6 +20,7 @@ st.set_page_config(
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 USE_MOCK = os.getenv("USE_MOCK", "false").lower() == "true"
 TRANSLATE_ENDPOINT = "/translate"
+EVALUATE_ENDPOINT = "/evaluate"
 
 # Fallback model used for UI rendering when backend is not yet reachable.
 # The real model list is fetched once the backend responds.
@@ -91,6 +92,66 @@ class TranslationResponse:
     tgt_lang: Optional[str] = None
     source: Optional[str] = None
     model_id: Optional[str] = None
+
+
+@dataclass
+class EvaluateItem:
+    """Single item for evaluation."""
+    source: str
+    reference: Optional[str] = None
+    item_id: Optional[str] = None
+
+
+@dataclass
+class EvaluateRequest:
+    """Request payload for the evaluation API."""
+    model_id: str
+    src_lang: str
+    tgt_lang: str
+    items: list[EvaluateItem]
+    metrics: Optional[list[str]] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "model_id": self.model_id,
+            "src_lang": self.src_lang,
+            "tgt_lang": self.tgt_lang,
+            "items": [
+                {
+                    "source": item.source,
+                    "reference": item.reference,
+                    "item_id": item.item_id,
+                }
+                for item in self.items
+            ],
+            "metrics": self.metrics,
+        }
+
+
+@dataclass
+class EvaluateItemResult:
+    """Single item result from evaluation."""
+    source: str
+    translated_value: str
+    latency_ms: int
+    metrics: dict[str, float]
+    reference: Optional[str] = None
+    item_id: Optional[str] = None
+    cpu_percent_per_core: Optional[float] = None
+    ram_mean_mb: Optional[float] = None
+    ram_peak_mb: Optional[float] = None
+
+
+@dataclass
+class EvaluateResponse:
+    """Response from the evaluation API."""
+    model_id: str
+    src_lang: str
+    tgt_lang: str
+    results: list[EvaluateItemResult]
+    aggregates: dict[str, float]
+    average_latency_ms: float
+    baseline_rss_mb: Optional[float] = None
 
 
 def wait_for_backend(timeout: int = 60) -> bool:
@@ -197,6 +258,49 @@ def mock_translate(request: TranslationRequest) -> TranslationResponse:
     )
 
 
+def evaluate_translations(request: EvaluateRequest) -> EvaluateResponse:
+    """
+    Send evaluation request to the API.
+    """
+    url = f"{API_BASE_URL}{EVALUATE_ENDPOINT}"
+
+    response = requests.post(
+        url,
+        json=request.to_dict(),
+        headers={"Content-Type": "application/json"},
+        timeout=300,  # Longer timeout for evaluation (can take time with COMET)
+    )
+    response.raise_for_status()
+
+    data = response.json()
+
+    # Parse results
+    results = [
+        EvaluateItemResult(
+            source=item["source"],
+            translated_value=item["translated_value"],
+            latency_ms=item["latency_ms"],
+            metrics=item.get("metrics", {}),
+            reference=item.get("reference"),
+            item_id=item.get("item_id"),
+            cpu_percent_per_core=item.get("cpu_percent_per_core"),
+            ram_mean_mb=item.get("ram_mean_mb"),
+            ram_peak_mb=item.get("ram_peak_mb"),
+        )
+        for item in data.get("results", [])
+    ]
+
+    return EvaluateResponse(
+        model_id=data["model_id"],
+        src_lang=data["src_lang"],
+        tgt_lang=data["tgt_lang"],
+        results=results,
+        aggregates=data.get("aggregates", {}),
+        average_latency_ms=data.get("average_latency_ms", 0.0),
+        baseline_rss_mb=data.get("baseline_rss_mb"),
+    )
+
+
 def init_session_state():
     """Initialise session state variables."""
     if "translation_result" not in st.session_state:
@@ -207,14 +311,6 @@ def init_session_state():
         st.session_state.last_was_warm = None
     if "last_word_count" not in st.session_state:
         st.session_state.last_word_count = None
-    if "cold_latency" not in st.session_state:
-        st.session_state.cold_latency = None
-    if "warm_latency" not in st.session_state:
-        st.session_state.warm_latency = None
-    if "show_comparison" not in st.session_state:
-        st.session_state.show_comparison = False
-    if "benchmark_mode" not in st.session_state:
-        st.session_state.benchmark_mode = True
     if "available_models" not in st.session_state:
         st.session_state.available_models = None
     if "selected_src_lang" not in st.session_state:
@@ -227,6 +323,10 @@ def init_session_state():
         st.session_state.csv_results = None
     if "csv_translation_started" not in st.session_state:
         st.session_state.csv_translation_started = False
+    if "eval_results" not in st.session_state:
+        st.session_state.eval_results = None
+    if "eval_selected_metrics" not in st.session_state:
+        st.session_state.eval_selected_metrics = ["bleu", "chrf"]
 
 
 @st.cache_data
@@ -354,32 +454,11 @@ def translation_fragment(src_lang_code: str, tgt_lang_code: str, selected_model:
 
             # Step 2: translate
             with st.spinner("Translating..."):
-                # force cold start if benchmark mode
-                if st.session_state.benchmark_mode and not USE_MOCK:
-                    unload_model(resolved_model_id)
+                response = translate_text(request) if not USE_MOCK else mock_translate(request)
 
-                    # Cold run
-                    cold_response = translate_text(request)
-                    st.session_state.cold_latency = cold_response.latency
-
-                    # Warm run
-                    warm_response = translate_text(request)
-                    st.session_state.warm_latency = warm_response.latency
-
-                    st.session_state.translation_result = warm_response.translated_value
-                    st.session_state.last_latency = warm_response.latency
-                    st.session_state.last_was_warm = True
-                    st.session_state.show_comparison = True
-
-                else:
-                    # Normal single run
-                    response = translate_text(request) if not USE_MOCK else mock_translate(request)
-
-                    st.session_state.translation_result = response.translated_value
-                    st.session_state.last_latency = response.latency
-                    st.session_state.last_was_warm = response.model_was_warm
-                    st.session_state.warm_latency = response.latency
-                    st.session_state.show_comparison = False
+                st.session_state.translation_result = response.translated_value
+                st.session_state.last_latency = response.latency
+                st.session_state.last_was_warm = response.model_was_warm
 
             st.rerun(scope="fragment")
 
@@ -413,7 +492,6 @@ def batch_translate_csv(
     src_lang: str,
     tgt_lang: str,
     model_id: str,
-    benchmark_mode: bool,
     progress_bar
 ) -> pd.DataFrame:
     """
@@ -425,7 +503,6 @@ def batch_translate_csv(
         src_lang: Source language code
         tgt_lang: Target language code
         model_id: Model ID to use for translation
-        benchmark_mode: If True, do cold+warm translation per row
         progress_bar: Streamlit progress bar object
 
     Returns:
@@ -442,12 +519,8 @@ def batch_translate_csv(
             result_row = {
                 "source": source_text,
                 "translation": "",
+                "latency_ms": None,
             }
-            if benchmark_mode:
-                result_row["t_cold_ms"] = None
-                result_row["t_warm_ms"] = None
-            else:
-                result_row["latency_ms"] = None
             results.append(result_row)
             progress_bar.progress((idx + 1) / total_rows)
             continue
@@ -460,32 +533,13 @@ def batch_translate_csv(
         )
 
         try:
-            if benchmark_mode:
-                # Unload model for cold start
-                if not USE_MOCK:
-                    unload_model(model_id)
+            response = translate_text(request) if not USE_MOCK else mock_translate(request)
 
-                # Cold translation
-                cold_response = translate_text(request) if not USE_MOCK else mock_translate(request)
-
-                # Warm translation
-                warm_response = translate_text(request) if not USE_MOCK else mock_translate(request)
-
-                result_row = {
-                    "source": source_text,
-                    "translation": warm_response.translated_value,
-                    "t_cold_ms": cold_response.latency * 1000,
-                    "t_warm_ms": warm_response.latency * 1000,
-                }
-            else:
-                # Normal single translation
-                response = translate_text(request) if not USE_MOCK else mock_translate(request)
-
-                result_row = {
-                    "source": source_text,
-                    "translation": response.translated_value,
-                    "latency_ms": response.latency * 1000,
-                }
+            result_row = {
+                "source": source_text,
+                "translation": response.translated_value,
+                "latency_ms": response.latency * 1000,
+            }
 
             results.append(result_row)
 
@@ -494,12 +548,8 @@ def batch_translate_csv(
             result_row = {
                 "source": source_text,
                 "translation": f"ERROR: {str(e)}",
+                "latency_ms": None,
             }
-            if benchmark_mode:
-                result_row["t_cold_ms"] = None
-                result_row["t_warm_ms"] = None
-            else:
-                result_row["latency_ms"] = None
             results.append(result_row)
 
         # Update progress
@@ -511,12 +561,7 @@ def batch_translate_csv(
     # Merge with original dataframe (keep all original columns)
     final_df = df.copy()
     final_df["translation"] = results_df["translation"]
-
-    if benchmark_mode:
-        final_df["t_cold_ms"] = results_df["t_cold_ms"]
-        final_df["t_warm_ms"] = results_df["t_warm_ms"]
-    else:
-        final_df["latency_ms"] = results_df["latency_ms"]
+    final_df["latency_ms"] = results_df["latency_ms"]
 
     return final_df
 
@@ -554,8 +599,8 @@ def main():
 
     # Now all caches are warm - UI will render instantly from here on
 
-    # Create tabs for Text, CSV, and Evaluation
-    tab_text, tab_csv, tab_eval = st.tabs(["Text", "CSV", "Evaluation"])
+    # Create tabs for Single, Batch, and Evaluation
+    tab_text, tab_csv, tab_eval = st.tabs(["Single", "Batch", "Evaluation"])
 
     with tab_text:
         # model selection
@@ -643,49 +688,27 @@ def main():
         # Translation UI fragment (isolated reruns for better performance)
         translation_fragment(src_lang_code, tgt_lang_code, selected_model)
 
-        # Display performance metrics (cold vs warm comparison for research)
+        # Display performance metrics
         if st.session_state.last_latency is not None:
             st.divider()
             st.subheader("Metrics")
 
-            # Show cold vs warm comparison only if we just did both measurements
-            if st.session_state.show_comparison and st.session_state.cold_latency is not None and st.session_state.warm_latency is not None:
-                # st.divider()
-                # st.subheader("Warmup impact")
+            metric_cols = st.columns(2)
 
-                comparison_cols = st.columns(2)
+            with metric_cols[0]:
+                latency_ms = st.session_state.last_latency * 1000
+                st.metric(
+                    label="Latency",
+                    value=f"{latency_ms:.1f} ms",
+                )
 
-                with comparison_cols[0]:
-                    cold_ms = st.session_state.cold_latency * 1000
-                    if st.session_state.last_word_count and st.session_state.cold_latency > 0:
-                        cold_wps = st.session_state.last_word_count / st.session_state.cold_latency
-                        st.metric(
-                            label="Cold Start",
-                            value=f"{cold_ms:.1f} ms",
-                            delta=f"{cold_wps:.2f} WPS",
-                            delta_color="off",
-                        )
-                    else:
-                        st.metric(
-                            label="Cold start",
-                            value=f"{cold_ms:.1f} ms",
-                        )
-
-                with comparison_cols[1]:
-                    warm_ms = st.session_state.warm_latency * 1000
-                    if st.session_state.last_word_count and st.session_state.warm_latency > 0:
-                        warm_wps = st.session_state.last_word_count / st.session_state.warm_latency
-                        speedup = st.session_state.cold_latency / st.session_state.warm_latency if st.session_state.warm_latency > 0 else 0
-                        st.metric(
-                            label="Warm start",
-                            value=f"{warm_ms:.1f} ms",
-                            delta=f"{warm_wps:.2f} WPS ({speedup:.1f}x faster)",
-                        )
-                    else:
-                        st.metric(
-                            label="Warm Start",
-                            value=f"{warm_ms:.1f} ms",
-                        )
+            with metric_cols[1]:
+                if st.session_state.last_word_count and st.session_state.last_latency > 0:
+                    wps = st.session_state.last_word_count / st.session_state.last_latency
+                    st.metric(
+                        label="Throughput",
+                        value=f"{wps:.2f} WPS",
+                    )
 
     with tab_csv:
         # Model selection for CSV
@@ -779,7 +802,6 @@ def main():
                                 src_lang=src_lang_code_csv,
                                 tgt_lang=tgt_lang_code_csv,
                                 model_id=selected_model_csv,
-                                benchmark_mode=st.session_state.benchmark_mode,
                                 progress_bar=progress_bar
                             )
 
@@ -815,39 +837,342 @@ def main():
                         use_container_width=True
                     )
 
-                    # Show summary statistics if benchmark mode
-                    if st.session_state.benchmark_mode and "t_cold_ms" in st.session_state.csv_results.columns:
-                        st.divider()
-                        st.subheader("Benchmark Statistics")
-
-                        col1, col2, col3 = st.columns(3)
-
-                        with col1:
-                            avg_cold = st.session_state.csv_results["t_cold_ms"].mean()
-                            st.metric("Avg Cold Start", f"{avg_cold:.1f} ms")
-
-                        with col2:
-                            avg_warm = st.session_state.csv_results["t_warm_ms"].mean()
-                            st.metric("Avg Warm Start", f"{avg_warm:.1f} ms")
-
-                        with col3:
-                            speedup = avg_cold / avg_warm if avg_warm > 0 else 0
-                            st.metric("Avg Speedup", f"{speedup:.2f}x")
-
             except Exception as e:
                 st.error(f"Error reading CSV file: {e}")
 
     with tab_eval:
-        st.subheader("Translation Evaluation")
-        st.info("Evaluation metrics and tools will be available here.")
+        # Model selection for evaluation
+        selected_model_eval = st.selectbox(
+            "Model",
+            options=model_ids,
+            index=0,
+            key="selected_model_eval",
+        )
 
-    # Benchmark mode toggle (placed at the bottom)
-    st.divider()
-    st.session_state.benchmark_mode = st.toggle(
-        "Benchmark mode",
-        value=st.session_state.benchmark_mode,
-        help="Unload model before translation to measure cold start vs warm start performance"
-    )
+        # Get model info for evaluation tab
+        model_info_eval = available_models_dict[selected_model_eval]
+        supported_pairs_tuple_eval = tuple(model_info_eval.get("supported_pairs", []))
+        src_lang_codes_eval, tgt_lang_codes_eval, src_lang_options_eval, tgt_lang_options_eval = get_language_options_for_model(
+            selected_model_eval, supported_pairs_tuple_eval
+        )
+
+        # Language selectors for evaluation
+        col_src_eval, col_tgt_eval = st.columns(2)
+
+        with col_src_eval:
+            src_lang_eval = st.selectbox(
+                "Source language",
+                options=src_lang_options_eval,
+                index=0,
+                key="src_lang_eval",
+            )
+            src_lang_code_eval = display_name_to_code(src_lang_eval)
+
+        with col_tgt_eval:
+            # Filter valid target languages
+            valid_tgt_codes_eval = get_valid_target_languages(selected_model_eval, supported_pairs_tuple_eval, src_lang_code_eval)
+            valid_tgt_options_eval = sorted([code_to_display_name(code) for code in valid_tgt_codes_eval])
+
+            if valid_tgt_options_eval:
+                tgt_lang_eval = st.selectbox(
+                    "Target language",
+                    options=valid_tgt_options_eval,
+                    index=0,
+                    key="tgt_lang_eval",
+                )
+                tgt_lang_code_eval = display_name_to_code(tgt_lang_eval)
+            else:
+                st.error(f"No target languages available for source language {src_lang_eval}")
+                st.stop()
+
+        # Metrics selection
+        st.divider()
+        st.write("**Metrics**")
+
+        # Available metrics
+        AVAILABLE_METRICS = {
+            "bleu": "BLEU (requires reference)",
+            "chrf": "chrF (requires reference)",
+            "ter": "TER (requires reference)",
+            "comet": "COMET (requires reference)",
+            "cometkiwi": "COMET-KIWI (reference-free)",
+        }
+
+        col_metric1, col_metric2, col_metric3 = st.columns(3)
+        with col_metric1:
+            use_bleu = st.checkbox("BLEU", value="bleu" in st.session_state.eval_selected_metrics, key="use_bleu")
+            use_chrf = st.checkbox("chrF", value="chrf" in st.session_state.eval_selected_metrics, key="use_chrf")
+        with col_metric2:
+            use_ter = st.checkbox("TER", value="ter" in st.session_state.eval_selected_metrics, key="use_ter")
+            use_comet = st.checkbox("COMET", value="comet" in st.session_state.eval_selected_metrics, key="use_comet")
+        with col_metric3:
+            use_cometkiwi = st.checkbox("COMET-KIWI", value="cometkiwi" in st.session_state.eval_selected_metrics, key="use_cometkiwi")
+
+        # Update selected metrics
+        selected_metrics = []
+        if use_bleu:
+            selected_metrics.append("bleu")
+        if use_chrf:
+            selected_metrics.append("chrf")
+        if use_ter:
+            selected_metrics.append("ter")
+        if use_comet:
+            selected_metrics.append("comet")
+        if use_cometkiwi:
+            selected_metrics.append("cometkiwi")
+
+        st.session_state.eval_selected_metrics = selected_metrics
+
+        if not selected_metrics:
+            st.warning("Please select at least one metric.")
+
+        # CSV file uploader for evaluation data
+        st.divider()
+        uploaded_eval_file = st.file_uploader(
+            "Upload evaluation CSV",
+            type=["csv"],
+            help="Upload a CSV file with 'source' and 'reference' columns. Optional 'item_id' column for tracking.",
+            key="eval_file_uploader"
+        )
+
+        if uploaded_eval_file is not None:
+            # Read and preview the CSV
+            try:
+                df_eval = pd.read_csv(uploaded_eval_file)
+                st.write(f"**Preview** ({len(df_eval)} rows):")
+                st.dataframe(df_eval.head(10), use_container_width=True)
+
+                # Validate required columns
+                if "source" not in df_eval.columns:
+                    st.error("CSV must contain a 'source' column.")
+                    st.stop()
+
+                # Check for reference column
+                has_reference = "reference" in df_eval.columns
+                has_item_id = "item_id" in df_eval.columns
+
+                # Check if reference is required
+                reference_required = any(metric in selected_metrics for metric in ["bleu", "chrf", "ter", "comet"])
+                if reference_required and not has_reference:
+                    st.error("Selected metrics require a 'reference' column in the CSV.")
+                    st.stop()
+
+                # Evaluate button
+                if st.button("Evaluate", type="primary", use_container_width=True, disabled=not selected_metrics):
+                    # Perform evaluation
+                    with st.spinner("Running evaluation..."):
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+
+                        try:
+                            # Ensure backend is reachable
+                            if not USE_MOCK:
+                                status_text.text("Waiting for backend...")
+                                if not wait_for_backend(timeout=120):
+                                    st.error("Backend is not responding. Please ensure the backend service is running.")
+                                    st.stop()
+
+                            status_text.text(f"Evaluating {len(df_eval)} items with {len(selected_metrics)} metrics...")
+                            progress_bar.progress(0.3)
+
+                            # Build evaluation request
+                            eval_items = []
+                            for idx, row in df_eval.iterrows():
+                                source = str(row["source"])
+                                reference = str(row["reference"]) if has_reference and pd.notna(row.get("reference")) else None
+                                item_id = str(row["item_id"]) if has_item_id and pd.notna(row.get("item_id")) else None
+
+                                if source and source != "nan":
+                                    eval_items.append(
+                                        EvaluateItem(
+                                            source=source,
+                                            reference=reference,
+                                            item_id=item_id,
+                                        )
+                                    )
+
+                            if not eval_items:
+                                st.error("No valid items to evaluate.")
+                                st.stop()
+
+                            progress_bar.progress(0.5)
+
+                            # Call evaluation API
+                            eval_request = EvaluateRequest(
+                                model_id=selected_model_eval,
+                                src_lang=src_lang_code_eval,
+                                tgt_lang=tgt_lang_code_eval,
+                                items=eval_items,
+                                metrics=selected_metrics,
+                            )
+
+                            eval_response = evaluate_translations(eval_request)
+
+                            # Store results in session state
+                            st.session_state.eval_results = eval_response
+
+                            progress_bar.progress(1.0)
+                            status_text.text("Evaluation complete!")
+                            st.success(f"Successfully evaluated {len(eval_items)} items!")
+
+                        except requests.RequestException as e:
+                            st.error(f"Evaluation failed: {e}")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+
+                # Display results if available
+                if st.session_state.eval_results is not None:
+                    st.divider()
+                    st.subheader("Evaluation Results")
+
+                    eval_resp: EvaluateResponse = st.session_state.eval_results
+
+                    # Display aggregate metrics
+                    st.write("**Aggregate Metrics**")
+
+                    # Group aggregates by metric type
+                    metric_names = set()
+                    for key in eval_resp.aggregates.keys():
+                        # Extract metric name (e.g., "bleu" from "bleu_mean")
+                        if "_mean" in key:
+                            metric_names.add(key.replace("_mean", ""))
+
+                    # Display metrics in columns
+                    num_metrics = len(metric_names)
+                    if num_metrics > 0:
+                        cols = st.columns(min(num_metrics, 4))
+                        for idx, metric_name in enumerate(sorted(metric_names)):
+                            with cols[idx % len(cols)]:
+                                mean_val = eval_resp.aggregates.get(f"{metric_name}_mean", 0.0)
+                                median_val = eval_resp.aggregates.get(f"{metric_name}_median", 0.0)
+                                stdev_val = eval_resp.aggregates.get(f"{metric_name}_stdev", 0.0)
+
+                                st.metric(
+                                    label=metric_name.upper(),
+                                    value=f"{mean_val:.4f}",
+                                    delta=f"σ={stdev_val:.4f}",
+                                    delta_color="off",
+                                )
+
+                    # Performance metrics
+                    st.divider()
+                    st.write("**Performance Metrics**")
+
+                    perf_cols = st.columns(4)
+                    with perf_cols[0]:
+                        st.metric("Avg Latency", f"{eval_resp.average_latency_ms:.1f} ms")
+                    with perf_cols[1]:
+                        cpu_mean = eval_resp.aggregates.get("cpu_percent_per_core_mean")
+                        if cpu_mean is not None:
+                            st.metric("Avg CPU %", f"{cpu_mean:.1f}%")
+                    with perf_cols[2]:
+                        ram_mean = eval_resp.aggregates.get("ram_mean_mb_mean")
+                        if ram_mean is not None:
+                            st.metric("Avg RAM", f"{ram_mean:.1f} MB")
+                    with perf_cols[3]:
+                        ram_peak = eval_resp.aggregates.get("ram_peak_mb_mean")
+                        if ram_peak is not None:
+                            st.metric("Peak RAM", f"{ram_peak:.1f} MB")
+
+                    # Per-item results table
+                    st.divider()
+                    st.write(f"**Per-Item Results** ({len(eval_resp.results)} items)")
+
+                    # Build dataframe for display
+                    results_data = []
+                    for item in eval_resp.results:
+                        row_data = {
+                            "item_id": item.item_id or "-",
+                            "source": item.source[:50] + "..." if len(item.source) > 50 else item.source,
+                            "reference": (item.reference[:50] + "..." if len(item.reference) > 50 else item.reference) if item.reference else "-",
+                            "translation": item.translated_value[:50] + "..." if len(item.translated_value) > 50 else item.translated_value,
+                            "latency_ms": item.latency_ms,
+                        }
+                        # Add metric scores
+                        for metric_name, metric_value in item.metrics.items():
+                            row_data[metric_name] = f"{metric_value:.4f}"
+
+                        # Add resource metrics
+                        if item.cpu_percent_per_core is not None:
+                            row_data["cpu_%"] = f"{item.cpu_percent_per_core:.1f}"
+                        if item.ram_mean_mb is not None:
+                            row_data["ram_mb"] = f"{item.ram_mean_mb:.1f}"
+
+                        results_data.append(row_data)
+
+                    results_df = pd.DataFrame(results_data)
+                    st.dataframe(results_df, use_container_width=True)
+
+                    # Download button for full results
+                    st.divider()
+
+                    # Build full CSV with all columns
+                    full_results_data = []
+                    for item in eval_resp.results:
+                        row_data = {
+                            "item_id": item.item_id or "",
+                            "source": item.source,
+                            "reference": item.reference or "",
+                            "translation": item.translated_value,
+                            "latency_ms": item.latency_ms,
+                        }
+                        # Add all metrics
+                        for metric_name, metric_value in item.metrics.items():
+                            row_data[metric_name] = metric_value
+
+                        # Add resource metrics
+                        if item.cpu_percent_per_core is not None:
+                            row_data["cpu_percent_per_core"] = item.cpu_percent_per_core
+                        if item.ram_mean_mb is not None:
+                            row_data["ram_mean_mb"] = item.ram_mean_mb
+                        if item.ram_peak_mb is not None:
+                            row_data["ram_peak_mb"] = item.ram_peak_mb
+
+                        full_results_data.append(row_data)
+
+                    full_results_df = pd.DataFrame(full_results_data)
+
+                    csv_buffer = io.StringIO()
+                    full_results_df.to_csv(csv_buffer, index=False)
+                    csv_data = csv_buffer.getvalue()
+
+                    st.download_button(
+                        label="Download Evaluation Results (CSV)",
+                        data=csv_data,
+                        file_name="evaluation_results.csv",
+                        mime="text/csv",
+                        type="primary",
+                        use_container_width=True
+                    )
+
+                    # Visualizations
+                    if len(eval_resp.results) > 1:
+                        st.divider()
+                        st.subheader("Visualizations")
+
+                        # Latency distribution
+                        st.write("**Latency Distribution**")
+                        latency_data = pd.DataFrame({
+                            "Item": [item.item_id or f"Item {i+1}" for i, item in enumerate(eval_resp.results)],
+                            "Latency (ms)": [item.latency_ms for item in eval_resp.results]
+                        })
+                        st.bar_chart(latency_data.set_index("Item"))
+
+                        # Metric distributions
+                        if metric_names:
+                            st.write("**Metric Distributions**")
+                            metric_tabs = st.tabs(list(sorted(metric_names)))
+
+                            for idx, metric_name in enumerate(sorted(metric_names)):
+                                with metric_tabs[idx]:
+                                    metric_data = pd.DataFrame({
+                                        "Item": [item.item_id or f"Item {i+1}" for i, item in enumerate(eval_resp.results)],
+                                        metric_name.upper(): [item.metrics.get(metric_name, 0.0) for item in eval_resp.results]
+                                    })
+                                    st.bar_chart(metric_data.set_index("Item"))
+
+            except Exception as e:
+                st.error(f"Error reading CSV file: {e}")
 
 
 if __name__ == "__main__":
