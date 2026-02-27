@@ -78,8 +78,8 @@ def _translate_with_resources(
     start_cpu = process.cpu_times()
     start_ctx = process.num_ctx_switches()
     baseline_rss_mb = process.memory_info().rss / (1024 ** 2)
-    start_time = time.perf_counter()
     input_token_count = adapter.count_tokens(text)
+    start_time = time.perf_counter()
     mem_samples, translated = memory_usage(
         (adapter.translate, (src_lang, tgt_lang, text), {}),
         interval=EVAL_MEM_INTERVAL,
