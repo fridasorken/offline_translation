@@ -1,0 +1,7 @@
+INFO:     Started server process [4626]
+INFO:     Waiting for application startup.
+INFO:app.registry:Loading model registry from /mnt/c/Users/rahay/Documents/offline_translation/src/eval_api/models.json
+INFO:app.registry:Loaded 1 model configurations (models will be loaded on demand)
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:47808 - "GET /health HTTP/1.1" 200 OK

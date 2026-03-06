@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -30,19 +31,26 @@ class CometScorer:
         self.gpus = gpus
         self.num_workers = num_workers
         self._model = None
+        self._lock = threading.Lock()
 
     def _load(self) -> None:
+        # Double-checked locking to prevent concurrent model loading
         if self._model is not None:
             return
 
-        from comet import download_model, load_from_checkpoint
+        with self._lock:
+            # Check again inside lock in case another thread loaded while waiting
+            if self._model is not None:
+                return
 
-        candidate = Path(self.model_name_or_path)
-        if candidate.exists():
-            checkpoint_path = str(candidate)
-        else:
-            checkpoint_path = download_model(self.model_name_or_path)
-        self._model = load_from_checkpoint(checkpoint_path)
+            from comet import download_model, load_from_checkpoint
+
+            candidate = Path(self.model_name_or_path)
+            if candidate.exists():
+                checkpoint_path = str(candidate)
+            else:
+                checkpoint_path = download_model(self.model_name_or_path)
+            self._model = load_from_checkpoint(checkpoint_path)
 
     def score_reference(self, source: str, hypothesis: str, reference: str) -> float:
         self._load()

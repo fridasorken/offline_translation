@@ -421,3 +421,18 @@ def list_models() -> ModelsListResponse:
         )
 
     return ModelsListResponse(models=models_info)
+
+
+@app.get("/health")
+def health_check() -> dict:
+    """Health check endpoint to verify backend is ready."""
+    try:
+        registry: ModelRegistry = app.state.registry
+        models_loaded = len(registry.list_models())
+        return {
+            "status": "ready",
+            "models_loaded": models_loaded,
+        }
+    except Exception as exc:
+        logger.error("Health check failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Service not ready")

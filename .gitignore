@@ -27,3 +27,6 @@ coverage/
 
 # OS junk
 .DS_Store
+
+# Miscellaneous
+sample_evaluation.csv
