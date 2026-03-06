@@ -467,10 +467,9 @@ def batch_translate_csv(
     src_lang: str,
     tgt_lang: str,
     model_id: str,
-    progress_bar
 ) -> pd.DataFrame:
     """
-    Batch translate a CSV file with progress tracking.
+    Batch translate a CSV file.
 
     Args:
         df: Input DataFrame
@@ -478,13 +477,11 @@ def batch_translate_csv(
         src_lang: Source language code
         tgt_lang: Target language code
         model_id: Model ID to use for translation
-        progress_bar: Streamlit progress bar object
 
     Returns:
         DataFrame with translation results
     """
     results = []
-    total_rows = len(df)
 
     for idx, row in df.iterrows():
         source_text = str(row[text_column])
@@ -497,7 +494,6 @@ def batch_translate_csv(
                 "latency_ms": None,
             }
             results.append(result_row)
-            progress_bar.progress((idx + 1) / total_rows)
             continue
 
         request = TranslationRequest(
@@ -526,9 +522,6 @@ def batch_translate_csv(
                 "latency_ms": None,
             }
             results.append(result_row)
-
-        # Update progress
-        progress_bar.progress((idx + 1) / total_rows)
 
     # Create results DataFrame
     results_df = pd.DataFrame(results)
@@ -756,38 +749,29 @@ def main():
                 # Translate button
                 if st.button("Translate CSV", type="primary", use_container_width=True):
                     # Perform batch translation
-                    with st.spinner("Translating..."):
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-
-                        try:
-                            # Ensure backend is reachable
-                            if not USE_MOCK:
-                                status_text.text("Waiting for backend...")
+                    try:
+                        # Ensure backend is reachable
+                        if not USE_MOCK:
+                            with st.spinner("Waiting for backend..."):
                                 if not wait_for_backend(timeout=120):
                                     st.error("Backend is not responding. Please ensure the backend service is running.")
                                     st.stop()
 
-                            status_text.text(f"Translating {len(df)} rows...")
+                        # Perform batch translation
+                        results_df = batch_translate_csv(
+                            df=df,
+                            text_column=text_column,
+                            src_lang=src_lang_code_csv,
+                            tgt_lang=tgt_lang_code_csv,
+                            model_id=selected_model_csv,
+                        )
 
-                            # Perform batch translation
-                            results_df = batch_translate_csv(
-                                df=df,
-                                text_column=text_column,
-                                src_lang=src_lang_code_csv,
-                                tgt_lang=tgt_lang_code_csv,
-                                model_id=selected_model_csv,
-                                progress_bar=progress_bar
-                            )
+                        # Store results in session state
+                        st.session_state.csv_results = results_df
+                        st.success(f"Successfully translated {len(df)} rows!")
 
-                            # Store results in session state
-                            st.session_state.csv_results = results_df
-
-                            status_text.text("Translation complete!")
-                            st.success(f"Successfully translated {len(df)} rows!")
-
-                        except Exception as e:
-                            st.error(f"Translation failed: {e}")
+                    except Exception as e:
+                        st.error(f"Translation failed: {e}")
 
                 # Display results if available
                 if st.session_state.csv_results is not None:
@@ -928,39 +912,31 @@ def main():
 
                 # Evaluate button
                 if st.button("Evaluate", type="primary", use_container_width=True, disabled=not selected_metrics):
-                    with st.spinner("Running evaluation..."):
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-
-                        try:
-                            # Ensure backend is reachable
-                            if not USE_MOCK:
-                                status_text.text("Waiting for backend...")
+                    try:
+                        # Ensure backend is reachable
+                        if not USE_MOCK:
+                            with st.spinner("Waiting for backend..."):
                                 if not wait_for_backend(timeout=120):
                                     st.error("Backend is not responding. Please ensure the backend service is running.")
                                     st.stop()
 
-                            status_text.text(f"Evaluating {len(df_eval)} items with {len(selected_metrics)} metrics...")
-                            progress_bar.progress(0.3)
+                        # Build evaluation request
+                        eval_items = [
+                            EvaluateItem(
+                                source=source,
+                                reference=str(row["reference"]) if has_reference and pd.notna(row.get("reference")) else None,
+                                item_id=str(row["item_id"]) if has_item_id and pd.notna(row.get("item_id")) else None,
+                            )
+                            for _, row in df_eval.iterrows()
+                            if (source := str(row["source"])) and source != "nan"
+                        ]
 
-                            # Build evaluation request
-                            eval_items = [
-                                EvaluateItem(
-                                    source=source,
-                                    reference=str(row["reference"]) if has_reference and pd.notna(row.get("reference")) else None,
-                                    item_id=str(row["item_id"]) if has_item_id and pd.notna(row.get("item_id")) else None,
-                                )
-                                for _, row in df_eval.iterrows()
-                                if (source := str(row["source"])) and source != "nan"
-                            ]
+                        if not eval_items:
+                            st.error("No valid items to evaluate.")
+                            st.stop()
 
-                            if not eval_items:
-                                st.error("No valid items to evaluate.")
-                                st.stop()
-
-                            progress_bar.progress(0.5)
-
-                            # Call evaluation API
+                        # Call evaluation API
+                        with st.spinner(f"Evaluating {len(eval_items)} items with {len(selected_metrics)} metrics..."):
                             eval_request = EvaluateRequest(
                                 model_id=selected_model_eval,
                                 src_lang=src_lang_code_eval,
@@ -971,17 +947,14 @@ def main():
 
                             eval_response = evaluate_translations(eval_request)
 
-                            # Store results in session state
-                            st.session_state.eval_results = eval_response
+                        # Store results in session state
+                        st.session_state.eval_results = eval_response
+                        st.success(f"Successfully evaluated {len(eval_items)} items!")
 
-                            progress_bar.progress(1.0)
-                            status_text.text("Evaluation complete!")
-                            st.success(f"Successfully evaluated {len(eval_items)} items!")
-
-                        except requests.RequestException as e:
-                            st.error(f"Evaluation failed: {e}")
-                        except Exception as e:
-                            st.error(f"Error: {e}")
+                    except requests.RequestException as e:
+                        st.error(f"Evaluation failed: {e}")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
 
                 # Display results if available
                 if st.session_state.eval_results is not None:
