@@ -5,7 +5,7 @@ import os
 import pandas as pd
 import io
 from typing import Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from enum import Enum
 
 # Page config must be first Streamlit command
@@ -48,10 +48,7 @@ class Language(Enum):
 
     @classmethod
     def from_code(cls, code: str) -> Optional["Language"]:
-        for lang in cls:
-            if lang.code == code:
-                return lang
-        return None
+        return next((lang for lang in cls if lang.code == code), None)
 
     @classmethod
     def get_display_names(cls) -> list[str]:
@@ -59,10 +56,7 @@ class Language(Enum):
 
     @classmethod
     def from_display_name(cls, name: str) -> Optional["Language"]:
-        for lang in cls:
-            if lang.display_name == name:
-                return lang
-        return None
+        return next((lang for lang in cls if lang.display_name == name), None)
 
 
 @dataclass
@@ -74,12 +68,7 @@ class TranslationRequest:
     model_id: str
     
     def to_dict(self) -> dict:
-        return {
-            "src_lang": self.src_lang,
-            "tgt_lang": self.tgt_lang,
-            "source": self.source,
-            "model_id": self.model_id,
-        }
+        return asdict(self)
 
 
 @dataclass
@@ -116,14 +105,7 @@ class EvaluateRequest:
             "model_id": self.model_id,
             "src_lang": self.src_lang,
             "tgt_lang": self.tgt_lang,
-            "items": [
-                {
-                    "source": item.source,
-                    "reference": item.reference,
-                    "item_id": item.item_id,
-                }
-                for item in self.items
-            ],
+            "items": [asdict(item) for item in self.items],
             "metrics": self.metrics,
         }
 
@@ -303,30 +285,23 @@ def evaluate_translations(request: EvaluateRequest) -> EvaluateResponse:
 
 def init_session_state():
     """Initialise session state variables."""
-    if "translation_result" not in st.session_state:
-        st.session_state.translation_result = None
-    if "last_latency" not in st.session_state:
-        st.session_state.last_latency = None
-    if "last_was_warm" not in st.session_state:
-        st.session_state.last_was_warm = None
-    if "last_word_count" not in st.session_state:
-        st.session_state.last_word_count = None
-    if "available_models" not in st.session_state:
-        st.session_state.available_models = None
-    if "selected_src_lang" not in st.session_state:
-        st.session_state.selected_src_lang = None
-    if "selected_tgt_lang" not in st.session_state:
-        st.session_state.selected_tgt_lang = None
-    if "models_preloaded" not in st.session_state:
-        st.session_state.models_preloaded = False
-    if "csv_results" not in st.session_state:
-        st.session_state.csv_results = None
-    if "csv_translation_started" not in st.session_state:
-        st.session_state.csv_translation_started = False
-    if "eval_results" not in st.session_state:
-        st.session_state.eval_results = None
-    if "eval_selected_metrics" not in st.session_state:
-        st.session_state.eval_selected_metrics = ["bleu", "chrf"]
+    defaults = {
+        "translation_result": None,
+        "last_latency": None,
+        "last_was_warm": None,
+        "last_word_count": None,
+        "available_models": None,
+        "selected_src_lang": None,
+        "selected_tgt_lang": None,
+        "models_preloaded": False,
+        "csv_results": None,
+        "csv_translation_started": False,
+        "eval_results": None,
+        "eval_selected_metrics": ["bleu", "chrf"],
+    }
+    for key, default in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = default
 
 
 @st.cache_data
@@ -908,18 +883,15 @@ def main():
         with col_metric3:
             use_cometkiwi = st.checkbox("COMET-KIWI", value="cometkiwi" in st.session_state.eval_selected_metrics, key="use_cometkiwi")
 
-        # Update selected metrics
-        selected_metrics = []
-        if use_bleu:
-            selected_metrics.append("bleu")
-        if use_chrf:
-            selected_metrics.append("chrf")
-        if use_ter:
-            selected_metrics.append("ter")
-        if use_comet:
-            selected_metrics.append("comet")
-        if use_cometkiwi:
-            selected_metrics.append("cometkiwi")
+        selected_metrics = [
+            name for name, enabled in [
+                ("bleu", use_bleu),
+                ("chrf", use_chrf),
+                ("ter", use_ter),
+                ("comet", use_comet),
+                ("cometkiwi", use_cometkiwi),
+            ] if enabled
+        ]
 
         st.session_state.eval_selected_metrics = selected_metrics
 
@@ -936,13 +908,11 @@ def main():
         )
 
         if uploaded_eval_file is not None:
-            # Read and preview the CSV
             try:
                 df_eval = pd.read_csv(uploaded_eval_file)
                 st.write(f"**Preview** ({len(df_eval)} rows):")
                 st.dataframe(df_eval.head(10), use_container_width=True)
 
-                # Validate required columns
                 if "source" not in df_eval.columns:
                     st.error("CSV must contain a 'source' column.")
                     st.stop()
@@ -951,7 +921,6 @@ def main():
                 has_reference = "reference" in df_eval.columns
                 has_item_id = "item_id" in df_eval.columns
 
-                # Check if reference is required
                 reference_required = any(metric in selected_metrics for metric in ["bleu", "chrf", "ter", "comet"])
                 if reference_required and not has_reference:
                     st.error("Selected metrics require a 'reference' column in the CSV.")
@@ -959,7 +928,6 @@ def main():
 
                 # Evaluate button
                 if st.button("Evaluate", type="primary", use_container_width=True, disabled=not selected_metrics):
-                    # Perform evaluation
                     with st.spinner("Running evaluation..."):
                         progress_bar = st.progress(0)
                         status_text = st.empty()
@@ -976,20 +944,15 @@ def main():
                             progress_bar.progress(0.3)
 
                             # Build evaluation request
-                            eval_items = []
-                            for idx, row in df_eval.iterrows():
-                                source = str(row["source"])
-                                reference = str(row["reference"]) if has_reference and pd.notna(row.get("reference")) else None
-                                item_id = str(row["item_id"]) if has_item_id and pd.notna(row.get("item_id")) else None
-
-                                if source and source != "nan":
-                                    eval_items.append(
-                                        EvaluateItem(
-                                            source=source,
-                                            reference=reference,
-                                            item_id=item_id,
-                                        )
-                                    )
+                            eval_items = [
+                                EvaluateItem(
+                                    source=source,
+                                    reference=str(row["reference"]) if has_reference and pd.notna(row.get("reference")) else None,
+                                    item_id=str(row["item_id"]) if has_item_id and pd.notna(row.get("item_id")) else None,
+                                )
+                                for _, row in df_eval.iterrows()
+                                if (source := str(row["source"])) and source != "nan"
+                            ]
 
                             if not eval_items:
                                 st.error("No valid items to evaluate.")
@@ -1023,19 +986,15 @@ def main():
                 # Display results if available
                 if st.session_state.eval_results is not None:
                     st.divider()
-                    st.subheader("Evaluation Results")
+                    st.subheader("Results")
 
                     eval_resp: EvaluateResponse = st.session_state.eval_results
 
                     # Display aggregate metrics
-                    st.write("**Aggregate Metrics**")
+                    st.write("**Aggregate metrics**")
 
                     # Group aggregates by metric type
-                    metric_names = set()
-                    for key in eval_resp.aggregates.keys():
-                        # Extract metric name (e.g., "bleu" from "bleu_mean")
-                        if "_mean" in key:
-                            metric_names.add(key.replace("_mean", ""))
+                    metric_names = {key.replace("_mean", "") for key in eval_resp.aggregates if "_mean" in key}
 
                     # Display metrics in columns
                     num_metrics = len(metric_names)

@@ -1,0 +1,58 @@
+services:
+  backend:
+    build:
+      context: ./src/eval_api
+      dockerfile: Dockerfile
+    container_name: translation-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LAZY_LOAD_MODELS=false
+      # Resource profiling settings
+      - EVAL_MEM_INTERVAL=0.1
+      - EVAL_MEM_BACKEND=psutil
+      - EVAL_WARMUP_ITEMS=1
+      # COMET settings (optional)
+      - COMET_MODEL_NAME=Unbabel/wmt22-comet-da
+      - COMET_KIWI_MODEL_NAME=Unbabel/wmt22-cometkiwi-da
+      - COMET_BATCH_SIZE=8
+      - COMET_GPUS=0
+      - COMET_NUM_WORKERS=1
+    volumes:
+      # Cache models to avoid re-downloading
+      - huggingface-cache:/root/.cache/huggingface
+      # Optional: mount local models directory
+      # - ./models:/app/models:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile
+    container_name: translation-frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - API_BASE_URL=http://backend:8000
+      - USE_MOCK=false
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  huggingface-cache:
+    driver: local
