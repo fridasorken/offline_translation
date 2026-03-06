@@ -1,8 +1,8 @@
 import logging
 from typing import Optional
 
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-import torch
+import ctranslate2
+from transformers import AutoTokenizer
 
 from .base import ModelAdapter
 
@@ -20,6 +20,8 @@ class TransformersAdapter(ModelAdapter):
         forced_bos_token_id: Optional[int] = None,
         local_files_only: bool = True,
         num_threads: Optional[int] = None,
+        tokenizer_path: Optional[str] = None,
+        compute_type: str = "default",
     ) -> None:
         self.model_path = model_path
         self.device = self._resolve_device(device)
@@ -28,21 +30,21 @@ class TransformersAdapter(ModelAdapter):
         self.forced_bos_token_id = forced_bos_token_id
         self.local_files_only = local_files_only
         self.num_threads = num_threads
-
-        if self.num_threads is not None:
-            torch.set_num_threads(self.num_threads)
+        self.tokenizer_path = tokenizer_path or model_path
+        self.compute_type = compute_type
 
         logger.info("Loading transformers model from %s on %s", model_path, self.device)
         self.tokenizer = AutoTokenizer.from_pretrained(
-            model_path,
+            self.tokenizer_path,
             local_files_only=self.local_files_only,
         )
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(
+        self.translator = ctranslate2.Translator(
             model_path,
-            local_files_only=self.local_files_only,
+            device=str(self.device),
+            inter_threads=1,
+            intra_threads=self.num_threads or 0,
+            compute_type=self.compute_type,
         )
-        self.model.to(self.device)
-        self.model.eval()
 
     def translate(self, src_lang: str, tgt_lang: str, text: str) -> str:
         forced_bos_token_id, prior_src_lang, prior_tgt_lang = self._prepare_language(
@@ -50,24 +52,35 @@ class TransformersAdapter(ModelAdapter):
             tgt_lang,
         )
         try:
-            inputs = self.tokenizer(text, return_tensors="pt")
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            input_tokens = self._encode_source(text)
+            target_prefix = self._build_target_prefix(forced_bos_token_id)
         finally:
             self._restore_language(prior_src_lang, prior_tgt_lang)
 
-        generate_kwargs = {
-            "num_beams": self.num_beams,
-            "max_new_tokens": self.max_new_tokens,
-            "do_sample": False,
-        }
-        if forced_bos_token_id is not None:
-            generate_kwargs["forced_bos_token_id"] = forced_bos_token_id
+        results = self.translator.translate_batch(
+            [input_tokens],
+            target_prefix=[target_prefix] if target_prefix else None,
+            beam_size=self.num_beams,
+            max_decoding_length=self.max_new_tokens,
+        )
 
-        with torch.no_grad():
-            output_tokens = self.model.generate(**inputs, **generate_kwargs)
+        output_tokens = self._strip_prefix(results[0].hypotheses[0], target_prefix)
+        return self.tokenizer.convert_tokens_to_string(output_tokens).strip()
+    
+    def _encode_source(self, text: str) -> list[str]:
+        input_ids = self.tokenizer.encode(text, add_special_tokens=True)
+        return self.tokenizer.convert_ids_to_tokens(input_ids)
 
-        translated = self.tokenizer.decode(output_tokens[0], skip_special_tokens=True)
-        return translated
+    def _build_target_prefix(self, forced_bos_token_id: Optional[int]) -> list[str]:
+        if forced_bos_token_id is None:
+            return []
+        return self.tokenizer.convert_ids_to_tokens([forced_bos_token_id])
+
+    @staticmethod
+    def _strip_prefix(output_tokens: list[str], prefix_tokens: list[str]) -> list[str]:
+        if prefix_tokens and output_tokens[:len(prefix_tokens)] == prefix_tokens:
+            return output_tokens[len(prefix_tokens):]
+        return output_tokens
 
     def _prepare_language(
         self,
@@ -115,11 +128,8 @@ class TransformersAdapter(ModelAdapter):
         return len(self.tokenizer.encode(text, add_special_tokens=False))
 
     @staticmethod
-    def _resolve_device(device: str) -> torch.device:
-        if device == "cuda" and not torch.cuda.is_available():
-            logger.warning("CUDA requested but not available. Falling back to CPU.")
-            return torch.device("cpu")
-        return torch.device(device)
+    def _resolve_device(device: str) -> str:
+        return device
     
 class NLLBAdapter(TransformersAdapter):    
     def _prepare_language(
@@ -152,29 +162,5 @@ class NLLBAdapter(TransformersAdapter):
     
 class OpusMTAdapter(TransformersAdapter):
     def translate(self, src_lang: str, tgt_lang: str, text: str) -> str:
-        """OPUS-MT models require language tags prepended to source text."""
         tagged_text = f">>{tgt_lang}<< {text}"
-        
-        forced_bos_token_id, prior_src_lang, prior_tgt_lang = self._prepare_language(
-            src_lang,
-            tgt_lang,
-        )
-        try:
-            inputs = self.tokenizer(tagged_text, return_tensors="pt")
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
-        finally:
-            self._restore_language(prior_src_lang, prior_tgt_lang)
-
-        generate_kwargs = {
-            "num_beams": self.num_beams,
-            "max_new_tokens": self.max_new_tokens,
-            "do_sample": False,
-        }
-        if forced_bos_token_id is not None:
-            generate_kwargs["forced_bos_token_id"] = forced_bos_token_id
-
-        with torch.no_grad():
-            output_tokens = self.model.generate(**inputs, **generate_kwargs)
-
-        translated = self.tokenizer.decode(output_tokens[0], skip_special_tokens=True)
-        return translated
+        return super().translate(src_lang, tgt_lang, tagged_text)
