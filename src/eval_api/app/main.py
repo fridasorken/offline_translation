@@ -266,8 +266,6 @@ def translate(request: TranslateRequest) -> TranslateResponse:
     if not registry.is_supported_pair(request.model_id, request.src_lang, request.tgt_lang):
         raise HTTPException(status_code=400, detail="unsupported language pair")
 
-    # Track if model was already loaded (for cold vs warm benchmarking)
-    model_was_warm = registry.is_model_loaded(request.model_id)
     adapter = registry.get_adapter(request.model_id)
 
     start = time.perf_counter()
@@ -279,19 +277,17 @@ def translate(request: TranslateRequest) -> TranslateResponse:
     latency_ms = int((time.perf_counter() - start) * 1000)
 
     logger.info(
-        "translate model_id=%s src=%s tgt=%s latency_ms=%d warm=%s",
+        "translate model_id=%s src=%s tgt=%s latency_ms=%d",
         request.model_id,
         request.src_lang,
         request.tgt_lang,
         latency_ms,
-        model_was_warm,
     )
 
     return TranslateResponse(
         model_id=request.model_id,
         translated_value=translated,
         latency_ms=latency_ms,
-        model_was_warm=model_was_warm,
     )
 
 
@@ -440,18 +436,3 @@ def health_check() -> dict:
     except Exception as exc:
         logger.error("Health check failed: %s", exc)
         raise HTTPException(status_code=503, detail="Service not ready")
-
-
-@app.post("/models/{model_id}/unload")
-def unload_model(model_id: str) -> dict:
-    """Unload a model from memory to force cold start on next use."""
-    registry: ModelRegistry = app.state.registry
-
-    try:
-        registry.get_config(model_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="model_id not found")
-
-    registry.unload_model(model_id)
-    logger.info("Unloaded model: %s", model_id)
-    return {"status": "unloaded", "model_id": model_id}

@@ -76,7 +76,6 @@ class TranslationResponse:
     """Response from the translation API."""
     translated_value: str
     latency: float
-    model_was_warm: bool = True
     src_lang: Optional[str] = None
     tgt_lang: Optional[str] = None
     source: Optional[str] = None
@@ -181,16 +180,6 @@ def fetch_available_models(silent: bool = False) -> dict[str, dict]:
         return {}
 
 
-def unload_model(model_id: str) -> None:
-    """Unload a model from backend memory to force cold start."""
-    try:
-        url = f"{API_BASE_URL}/models/{model_id}/unload"
-        response = requests.post(url, timeout=5)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        st.warning(f"Could not unload model: {e}")
-
-
 def translate_text(request: TranslationRequest) -> TranslationResponse:
     """
     Send translation request to the API.
@@ -212,7 +201,6 @@ def translate_text(request: TranslationRequest) -> TranslationResponse:
     return TranslationResponse(
         translated_value=data.get("translated_value", ""),
         latency=latency_seconds,
-        model_was_warm=data.get("model_was_warm", True),
         src_lang=data.get("src_lang"),
         tgt_lang=data.get("tgt_lang"),
         source=data.get("source"),
@@ -232,7 +220,6 @@ def mock_translate(request: TranslationRequest) -> TranslationResponse:
     return TranslationResponse(
         translated_value=f"[mock translation of: {request.source}]",
         latency=simulated_latency,
-        model_was_warm=True,
         src_lang=request.src_lang,
         tgt_lang=request.tgt_lang,
         source=request.source,
@@ -288,7 +275,6 @@ def init_session_state():
     defaults = {
         "translation_result": None,
         "last_latency": None,
-        "last_was_warm": None,
         "last_word_count": None,
         "available_models": None,
         "selected_src_lang": None,
@@ -433,7 +419,6 @@ def translation_fragment(src_lang_code: str, tgt_lang_code: str, selected_model:
 
                 st.session_state.translation_result = response.translated_value
                 st.session_state.last_latency = response.latency
-                st.session_state.last_was_warm = response.model_was_warm
 
             st.rerun(scope="fragment")
 
