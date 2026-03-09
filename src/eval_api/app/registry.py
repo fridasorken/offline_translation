@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Dict, Iterable, Optional, Set, Tuple
 
 from .adapters.base import ModelAdapter
+from .adapters.opusmt_ctranslate2 import OpusMTCTranslate2Adapter
+from .adapters.transformers_ctranslate2 import M2MCTranslate2Adapter, NLLBCTranslate2Adapter
 from .adapters.transformers import TransformersAdapter, NLLBAdapter, OpusMTAdapter
 
 logger = logging.getLogger(__name__)
@@ -100,6 +102,12 @@ class ModelRegistry:
             return NLLBAdapter(config.model_path, **config.adapter_params)
         elif config.adapter == "opusmt":
             return OpusMTAdapter(config.model_path, **config.adapter_params)
+        elif config.adapter == "opusmt_ct2":
+            return OpusMTCTranslate2Adapter(config.model_path, **config.adapter_params)
+        elif config.adapter == "m2m_ct2":
+            return M2MCTranslate2Adapter(config.model_path, **config.adapter_params)
+        elif config.adapter == "nllb_ct2":
+            return NLLBCTranslate2Adapter(config.model_path, **config.adapter_params)
         raise ValueError(f"Unsupported adapter: {config.adapter}")
 
     @staticmethod
@@ -134,7 +142,14 @@ class ModelRegistry:
             raise ValueError("model_path must be a string")
 
         local_files_only = bool(adapter_params.get("local_files_only", True))
-        if adapter_name in ("transformers", "nllb", "opusmt"):
+        if adapter_name in (
+            "transformers",
+            "nllb",
+            "opusmt",
+            "opusmt_ct2",
+            "m2m_ct2",
+            "nllb_ct2",
+        ):
             candidate = Path(model_path_raw)
             if not candidate.is_absolute():
                 candidate = (BASE_DIR / candidate).resolve()

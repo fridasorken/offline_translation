@@ -11,6 +11,7 @@ dependencies = [
   "accelerate>=0.30",
   "sentencepiece>=0.2",
   "torch>=2.2",
+  "ctranslate2>=4.4",
   "sacrebleu>=2.4",
   "unbabel-comet>=2.2",
   "memory-profiler>=0.61",
