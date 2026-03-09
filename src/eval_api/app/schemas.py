@@ -36,6 +36,7 @@ class EvaluateItemResult(BaseModel):
     reference: Optional[NonEmptyStr] = None
     translated_value: NonEmptyStr
     latency_ms: int = Field(ge=0)
+    pure_inference_latency_ms: Optional[int] = Field(default=None, ge=0)
     metrics: dict[str, float] = Field(default_factory=dict)
     item_id: Optional[NonEmptyStr] = None
     cpu_percent_per_core: Optional[float] = Field(default=None, ge=0)
@@ -57,6 +58,7 @@ class EvaluateResponse(BaseModel):
     results: list[EvaluateItemResult]
     aggregates: dict[str, float] = Field(default_factory=dict)
     average_latency_ms: float = Field(ge=0)
+    average_pure_inference_latency_ms: Optional[float] = Field(default=None, ge=0)
     baseline_rss_mb: Optional[float] = Field(default=None, ge=0)
 
 

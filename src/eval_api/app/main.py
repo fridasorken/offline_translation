@@ -4,6 +4,7 @@ import os
 import time
 from statistics import mean, median, pstdev
 from contextlib import asynccontextmanager
+from queue import Empty
 
 from fastapi import FastAPI, HTTPException
 from memory_profiler import memory_usage
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 EVAL_MEM_INTERVAL = float(os.getenv("EVAL_MEM_INTERVAL", "0.1"))
 EVAL_MEM_BACKEND = os.getenv("EVAL_MEM_BACKEND", "psutil")
 EVAL_WARMUP_ITEMS = int(os.getenv("EVAL_WARMUP_ITEMS", "1"))
+EVAL_WORKER_TIMEOUT_SECONDS = int(os.getenv("EVAL_WORKER_TIMEOUT_SECONDS", "3600"))
 
 
 @asynccontextmanager
@@ -66,7 +68,7 @@ def _translate_with_resources(
     src_lang: str,
     tgt_lang: str,
     text: str,
-) -> tuple[str, int, float | None, float | None, float | None]:
+) -> tuple[str, int, int, float | None, float | None, float | None, dict[str, float | int | None]]:
     """
     Translate and optionally profile resource usage.
 
@@ -79,9 +81,18 @@ def _translate_with_resources(
     start_ctx = process.num_ctx_switches()
     baseline_rss_mb = process.memory_info().rss / (1024 ** 2)
     input_token_count = adapter.count_tokens(text)
+    pure_inference_seconds = 0.0
+
+    def _timed_translate() -> str:
+        nonlocal pure_inference_seconds
+        infer_start = time.perf_counter()
+        output = adapter.translate(src_lang, tgt_lang, text)
+        pure_inference_seconds = time.perf_counter() - infer_start
+        return output
+
     start_time = time.perf_counter()
     mem_samples, translated = memory_usage(
-        (adapter.translate, (src_lang, tgt_lang, text), {}),
+        (_timed_translate, (), {}),
         interval=EVAL_MEM_INTERVAL,
         backend=EVAL_MEM_BACKEND,
         retval=True,
@@ -90,6 +101,7 @@ def _translate_with_resources(
     end_cpu = process.cpu_times()
     end_ctx = process.num_ctx_switches()
     latency_ms = int(wall * 1000)
+    pure_inference_latency_ms = int(max(pure_inference_seconds, 0.0) * 1000)
     output_token_count = adapter.count_tokens(translated)
     total_tokens = input_token_count + output_token_count
     total_tokens_per_second = total_tokens / wall if wall > 0 else 0.0
@@ -121,9 +133,10 @@ def _translate_with_resources(
         "total_tokens_per_second": total_tokens_per_second,
         "output_tokens_per_second": output_tokens_per_second,
         "ctx_switches_involuntary": ctx_switches_involuntary,
+        "pure_inference_latency_ms": pure_inference_latency_ms,
     }
 
-    return translated, latency_ms, cpu_percent, ram_mean, ram_peak, detailed_metrics
+    return translated, latency_ms, pure_inference_latency_ms, cpu_percent, ram_mean, ram_peak, detailed_metrics
 
 
 def _isolated_translate_worker(payload: dict, queue: mp.Queue) -> None:
@@ -147,7 +160,15 @@ def _isolated_translate_worker(payload: dict, queue: mp.Queue) -> None:
 
         results: list[dict] = []
         for item in items:
-            translated, latency_ms, cpu_percent, ram_mean, ram_peak, detailed_metrics = _translate_with_resources(
+            (
+                translated,
+                latency_ms,
+                pure_inference_latency_ms,
+                cpu_percent,
+                ram_mean,
+                ram_peak,
+                detailed_metrics,
+            ) = _translate_with_resources(
                 adapter,
                 src_lang,
                 tgt_lang,
@@ -159,6 +180,7 @@ def _isolated_translate_worker(payload: dict, queue: mp.Queue) -> None:
                     "reference": item.get("reference"),
                     "translated_value": translated,
                     "latency_ms": latency_ms,
+                    "pure_inference_latency_ms": pure_inference_latency_ms,
                     "item_id": item.get("item_id"),
                     "cpu_percent_per_core": cpu_percent,
                     "ram_mean_mb": ram_mean,
@@ -186,7 +208,7 @@ def _isolated_translate_worker(payload: dict, queue: mp.Queue) -> None:
 def _run_isolated_translation(
     registry: ModelRegistry,
     request: EvaluateRequest,
-) -> tuple[list[EvaluateItemResult], float | None, list[int]]:
+) -> tuple[list[EvaluateItemResult], float | None, list[int], list[int]]:
     """Spawn a translation-only worker so resource stats aren't polluted by metrics."""
     ctx = mp.get_context("spawn")
     queue: mp.Queue = ctx.Queue()
@@ -202,15 +224,25 @@ def _run_isolated_translation(
     }
     process = ctx.Process(target=_isolated_translate_worker, args=(payload, queue))
     process.start()
-    process.join()
 
-    if process.exitcode != 0:
+    try:
+        # Drain queue before joining to avoid deadlock on large payloads.
+        message = queue.get(timeout=EVAL_WORKER_TIMEOUT_SECONDS)
+    except Empty:
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=2)
         raise HTTPException(status_code=500, detail="translation failed")
 
-    if queue.empty():
+    process.join(timeout=2)
+    if process.is_alive():
+        process.terminate()
+        process.join(timeout=2)
         raise HTTPException(status_code=500, detail="translation failed")
 
-    message = queue.get()
+    if process.exitcode is not None and process.exitcode != 0:
+        raise HTTPException(status_code=500, detail="translation failed")
+
     if "error" in message:
         logger.error("Isolated translation failed: %s", message["error"])
         raise HTTPException(status_code=500, detail="translation failed")
@@ -221,6 +253,7 @@ def _run_isolated_translation(
             reference=item.get("reference"),
             translated_value=item["translated_value"],
             latency_ms=item["latency_ms"],
+            pure_inference_latency_ms=item.get("pure_inference_latency_ms"),
             metrics={},
             item_id=item.get("item_id"),
             cpu_percent_per_core=item.get("cpu_percent_per_core"),
@@ -237,11 +270,17 @@ def _run_isolated_translation(
         for item in message.get("results", [])
     ]
     latency_values = [item.latency_ms for item in results]
+    pure_inference_latency_values = [
+        item.pure_inference_latency_ms
+        for item in results
+        if item.pure_inference_latency_ms is not None
+    ]
 
     return (
         results,
         message.get("baseline_rss_mb"),
         latency_values,
+        pure_inference_latency_values,
     )
 
 # CORS middleware to allow frontend access
@@ -320,7 +359,7 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
 
     metric_buckets: dict[str, list[float]] = {}
     # Translation+profiling runs in a separate process to keep COMET/metrics out of RAM/CPU stats.
-    pending_results, baseline_rss_mb, latency_values = _run_isolated_translation(
+    pending_results, baseline_rss_mb, latency_values, pure_inference_latency_values = _run_isolated_translation(
         registry,
         request,
     )
@@ -369,7 +408,7 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
 
     total_tps_values = [item.total_tokens_per_second for item in results if item.total_tokens_per_second is not None]
     if total_tps_values:
-        aggregates["total_tokens_per_secondmean"] = mean(total_tps_values)
+        aggregates["total_tokens_per_second_mean"] = mean(total_tps_values)
         aggregates["total_tokens_per_second_median"] = median(total_tps_values)
         aggregates["total_tokens_per_second_stdev"] = pstdev(total_tps_values)
 
@@ -385,6 +424,9 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
         aggregates["ctx_switches_involuntary_max"] = max(ctx_switches_involuntary_values)
 
     average_latency_ms = mean(latency_values) if latency_values else 0.0
+    average_pure_inference_latency_ms = (
+        mean(pure_inference_latency_values) if pure_inference_latency_values else None
+    )
 
     if latency_values:
         aggregates["latency_p50_ms"] = percentile(latency_values, 50)
@@ -393,6 +435,16 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
         aggregates["latency_min_ms"] = min(latency_values)
         aggregates["latency_max_ms"] = max(latency_values)
 
+    if pure_inference_latency_values:
+        aggregates["pure_inference_latency_mean_ms"] = mean(pure_inference_latency_values)
+        aggregates["pure_inference_latency_median_ms"] = median(pure_inference_latency_values)
+        aggregates["pure_inference_latency_stdev_ms"] = pstdev(pure_inference_latency_values)
+        aggregates["pure_inference_latency_p50_ms"] = percentile(pure_inference_latency_values, 50)
+        aggregates["pure_inference_latency_p95_ms"] = percentile(pure_inference_latency_values, 95)
+        aggregates["pure_inference_latency_p99_ms"] = percentile(pure_inference_latency_values, 99)
+        aggregates["pure_inference_latency_min_ms"] = min(pure_inference_latency_values)
+        aggregates["pure_inference_latency_max_ms"] = max(pure_inference_latency_values)
+
     return EvaluateResponse(
         model_id=request.model_id,
         src_lang=request.src_lang,
@@ -400,6 +452,7 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
         results=results,
         aggregates=aggregates,
         average_latency_ms=average_latency_ms,
+        average_pure_inference_latency_ms=average_pure_inference_latency_ms,
         baseline_rss_mb=baseline_rss_mb,
     )
 
