@@ -15,12 +15,12 @@ uv sync
 
 ## Configure models
 
-Edit `models.json` to point at local model folders (no downloads at runtime).
+Edit `models.json` to define model adapters and paths.
 
 ```json
 {
   "translation-model-1": {
-    "adapter": "transformers",
+    "adapter": "opusmt_ct2",
     "model_path": "./models/opus-mt-no-en",
     "supported_pairs": [["no", "en"]],
     "num_beams": 4,
@@ -35,12 +35,47 @@ Optional config keys (adapter-specific):
 - `max_new_tokens` (int)
 - `device` ("cpu" or "cuda")
 - `forced_bos_token_id` (int)
+- `local_files_only` (bool)
+
+For `opusmt_ct2`:
+- `ct2_model_path` (optional path for converted CT2 model)
+- `ct2_cache_dir` (optional cache root for converted CT2 models)
+- `tokenizer_path` (optional tokenizer source, defaults to `model_path`)
+- `quantization` (default: `float32`)
+- `compute_type` (default: `default`)
+- `inter_threads` (default: `1`)
+- `num_threads` (maps to CT2 `intra_threads`)
+
+Additional CTranslate2 adapters:
+- `m2m_ct2` for M2M100 models
+- `nllb_ct2` for NLLB models
 
 If you want to use a different config path, set:
 
 ```bash
 export MODELS_CONFIG_PATH=./models.json
 ```
+
+## Fine-tuned OPUS models from Hugging Face
+
+The eval API can pull your fine-tuned OPUS models directly from Hugging Face on first use.
+No separate download script is required as long as the model entry has:
+- `model_path` set to a Hugging Face repo id
+- `local_files_only` set to `false`
+- `adapter` set to `opusmt_ct2` (for CTranslate2 runtime)
+
+These model IDs are configured in `models.json`:
+- `opus-mt-tc-big-en-de-military-v1` -> `MariusBerg/opus-tc-big-en-de-military-v1`
+- `opus-mt-tc-big-en-nob-military` -> `MariusBerg/opus-tc-big-en-nob-military`
+- `opus-mt-tc-big-en-pt-military` -> `MariusBerg/opus-tc-big-en-pt-military`
+- `m2m-100-1.2b` -> `facebook/m2m100_1.2B`
+- `m2m-100-418m-ct2` -> `facebook/m2m100_418M` (CT2 adapter)
+- `m2m-100-1.2b-ct2` -> `facebook/m2m100_1.2B` (CT2 adapter)
+- `nllb-200-distilled-600m-ct2` -> `facebook/nllb-200-distilled-600M` (CT2 adapter)
+
+The first request against each OPUS model downloads tokenizer/model files and converts the
+checkpoint to CTranslate2 under `src/eval_api/models/ct2/` (or your configured CT2 cache dir).
+Later requests load the converted CT2 model from cache.
 
 When adding a model that has specific configuration requirements, other than what is supplied by the `transformers` adapter, you might need to create a subclass of the `TransformersAdapter` class in `transformers.py` and add it in the functions `_build_adapter` and `_resolve_model_ref` in `registry.py`.
 
@@ -123,6 +158,7 @@ Response:
       "reference": "Hold position at the bridge. No enemy in sight.",
       "translated_value": "Hold position at the bridge. No enemy in sight.",
       "latency_ms": 147,
+      "pure_inference_latency_ms": 132,
       "cpu_percent_per_core": 42.1,
       "ram_mean_mb": 1250.4,
       "ram_peak_mb": 1275.9,
@@ -158,6 +194,7 @@ Response:
     "ram_peak_mb_stdev": 0.0
   },
   "average_latency_ms": 147.0,
+  "average_pure_inference_latency_ms": 132.0,
   "baseline_rss_mb": 1234.5
 }
 ```
@@ -175,7 +212,8 @@ Translation metrics:
 - `cometkiwi` uses COMET reference-free scoring on the model output (no reference required).
 
 Resource metrics (translation-only):
-- `latency_ms` is wall-clock time for translation in the isolated worker (does not include metric computation).
+- `latency_ms` is profiled wall-clock time in the isolated worker (translation wrapped with memory sampling, no metric computation).
+- `pure_inference_latency_ms` is the direct timer around `adapter.translate(...)` for the same item.
 - `cpu_percent_per_core` is computed from CPU time deltas: `(user + system CPU seconds) / wall_seconds / logical_cores * 100`.
 - `ram_mean_mb` and `ram_peak_mb` are the mean/peak of sampled RSS during translation, minus the pre-translation baseline RSS.
 - `baseline_rss_mb` is the RSS right after the model is loaded in the worker (idle footprint).
@@ -189,7 +227,7 @@ Resource metrics (translation-only):
 Aggregates:
 - For each translation quality and resource metric above, we report `mean`, `median`, and `stdev` across the batch.
 - For `ctx_switches_involuntary` we report the sum and max across the batch.
-- For `latency_ms`, we report the average and tail latency (`p50`, `p95` and `p99`) across the batch, as well as `min` and `max`.
+- For `latency_ms` and `pure_inference_latency_ms`, we report average and tail latency (`p50`, `p95` and `p99`) across the batch, plus `min` and `max`.
 
 ## COMET configuration
 
