@@ -25,5 +25,10 @@ dist/
 build/
 coverage/
 
+# Standalone fine-tune project artifacts
+finetune/model/
+finetune/outputs/
+finetune/results/
+
 # OS junk
 .DS_Store

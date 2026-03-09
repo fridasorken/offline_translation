@@ -6,6 +6,7 @@ __pycache__/
 # Local training artifacts (large)
 model/
 outputs/
+results/
 
 # Notebook checkpoints
 .ipynb_checkpoints/

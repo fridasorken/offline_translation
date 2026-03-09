@@ -1,0 +1,52 @@
+{
+  "ids": {
+    "batch_id": 8
+  },
+  "paths": {
+    "raw_generated_jsonl": "./data/generated_en_de_military_finalized_v1_openrouter.jsonl",
+    "fixed_ids_jsonl": "./data/generated_en_de_military_fixed_ids_unused.jsonl",
+    "malformed_lines_log": "./results/generated_en_de_military_malformed_lines_unused.txt",
+    "train_ready_jsonl": "./data/generated_en_de_military_finalized_v1_openrouter.jsonl",
+    "train_ready_report_json": "./results/generated_en_de_military_train_ready_report_unused.json",
+    "hf_train_jsonl": "./data/opus_en_de_train_v1.jsonl",
+    "hf_eval_jsonl": "./data/opus_en_de_eval_v1.jsonl",
+    "hf_test_jsonl": "./data/opus_en_de_test_v1.jsonl",
+    "split_report_json": "./results/opus_en_de_split_report_v1.json",
+    "training_output_dir": "./outputs/opus_tc_big_en_de_ft_v1",
+    "best_model_dir": "./outputs/opus_tc_big_en_de_ft_best_v1",
+    "training_metrics_json": "./results/opus_tc_big_en_de_ft_metrics_v1.json",
+    "benchmark_output_json": "./results/opus_en_de_test_comet_comparison_v1.json"
+  },
+  "dataset": {
+    "random_seed": 42,
+    "eval_ratio": 0.1,
+    "test_ratio": 0.1,
+    "max_source_length": 192,
+    "max_target_length": 192
+  },
+  "training": {
+    "model_ref": "gsarti/opus-mt-tc-big-en-de",
+    "source_lang": "en",
+    "target_lang": "deu",
+    "use_target_prefix": false,
+    "disable_eval_during_training": true,
+    "skip_final_eval": true,
+    "local_files_only": false,
+    "learning_rate": 2e-06,
+    "num_train_epochs": 0.8,
+    "per_device_train_batch_size": 8,
+    "per_device_eval_batch_size": 8,
+    "gradient_accumulation_steps": 2,
+    "warmup_ratio": 0.05,
+    "weight_decay": 0.01,
+    "logging_steps": 50,
+    "eval_steps": 300,
+    "save_steps": 300,
+    "save_total_limit": 2,
+    "num_beams_eval": 4,
+    "fp16": false,
+    "bf16": false,
+    "gradient_checkpointing": true,
+    "dataloader_num_workers": 0
+  }
+}

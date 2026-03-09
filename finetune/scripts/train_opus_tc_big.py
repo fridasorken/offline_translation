@@ -76,6 +76,10 @@ def main() -> None:
 
     source_lang = training_cfg["source_lang"]
     target_lang = training_cfg["target_lang"]
+    use_target_prefix = bool(training_cfg.get("use_target_prefix", True))
+    target_prefix_template = str(training_cfg.get("target_prefix_template", ">>{target_lang}<< "))
+    disable_eval_during_training = bool(training_cfg.get("disable_eval_during_training", False))
+    skip_final_eval = bool(training_cfg.get("skip_final_eval", False))
     model_ref = training_cfg["model_ref"]
     local_files_only = bool(training_cfg.get("local_files_only", False))
 
@@ -83,8 +87,8 @@ def main() -> None:
     max_target_length = int(dataset_cfg["max_target_length"])
 
     data_files = {"train": str(train_jsonl)}
-    has_eval = eval_jsonl.exists() and eval_jsonl.stat().st_size > 0
-    if has_eval:
+    has_eval_dataset = eval_jsonl.exists() and eval_jsonl.stat().st_size > 0
+    if has_eval_dataset:
         data_files["eval"] = str(eval_jsonl)
 
     dataset = load_dataset("json", data_files=data_files)
@@ -99,7 +103,11 @@ def main() -> None:
         print("cast_model_to_fp32_for_training=true")
 
     def preprocess(examples: dict) -> dict:
-        source_texts = [f">>{target_lang}<< {text}" for text in examples["source"]]
+        if use_target_prefix:
+            prefix = target_prefix_template.format(target_lang=target_lang)
+            source_texts = [f"{prefix}{text}" for text in examples["source"]]
+        else:
+            source_texts = list(examples["source"])
         model_inputs = tokenizer(
             source_texts,
             max_length=max_source_length,
@@ -147,7 +155,8 @@ def main() -> None:
         ter = sacrebleu.corpus_ter(pred_text, [label_text]).score
         return {"bleu": float(bleu), "chrf": float(chrf), "ter": float(ter)}
 
-    evaluation_strategy = "steps" if has_eval else "no"
+    enable_during_training_eval = has_eval_dataset and not disable_eval_during_training
+    evaluation_strategy = "steps" if enable_during_training_eval else "no"
     warmup_ratio = float(training_cfg.get("warmup_ratio", 0.0))
     train_rows = max(1, len(tokenized["train"]))
     per_device_bs = max(1, int(training_cfg["per_device_train_batch_size"]))
@@ -178,9 +187,9 @@ def main() -> None:
         "bf16": bool(training_cfg.get("bf16", False)),
         "gradient_checkpointing": bool(training_cfg.get("gradient_checkpointing", False)),
         "dataloader_num_workers": int(training_cfg.get("dataloader_num_workers", 0)),
-        "load_best_model_at_end": has_eval,
-        "metric_for_best_model": "bleu" if has_eval else None,
-        "greater_is_better": True if has_eval else None,
+        "load_best_model_at_end": enable_during_training_eval,
+        "metric_for_best_model": "bleu" if enable_during_training_eval else None,
+        "greater_is_better": True if enable_during_training_eval else None,
         "report_to": [],
     }
 
@@ -208,9 +217,9 @@ def main() -> None:
         "model": model,
         "args": training_args,
         "train_dataset": tokenized["train"],
-        "eval_dataset": tokenized.get("eval"),
+        "eval_dataset": tokenized.get("eval") if has_eval_dataset else None,
         "data_collator": data_collator,
-        "compute_metrics": compute_metrics if has_eval else None,
+        "compute_metrics": compute_metrics if has_eval_dataset else None,
     }
     supported_trainer_args = inspect.signature(Seq2SeqTrainer.__init__).parameters
     if "tokenizer" in supported_trainer_args:
@@ -227,14 +236,20 @@ def main() -> None:
     train_metrics = dict(train_result.metrics)
 
     eval_metrics: dict[str, float] = {}
-    if has_eval:
+    if has_eval_dataset and not skip_final_eval:
         eval_metrics = dict(trainer.evaluate())
 
     trainer.save_model(str(output_dir))
     tokenizer.save_pretrained(str(output_dir))
 
-    best_checkpoint = _copy_best_checkpoint(trainer, best_model_dir) if has_eval else None
-    if not has_eval:
+    best_checkpoint = _copy_best_checkpoint(trainer, best_model_dir) if enable_during_training_eval else None
+    if not enable_during_training_eval:
+        if best_model_dir.exists():
+            shutil.rmtree(best_model_dir)
+        shutil.copytree(output_dir, best_model_dir)
+        best_checkpoint = str(output_dir)
+    elif not best_checkpoint:
+        # Fallback for short runs where no eval/save step is hit before training ends.
         if best_model_dir.exists():
             shutil.rmtree(best_model_dir)
         shutil.copytree(output_dir, best_model_dir)
@@ -245,8 +260,12 @@ def main() -> None:
         "model_ref": model_ref,
         "source_lang": source_lang,
         "target_lang": target_lang,
+        "use_target_prefix": use_target_prefix,
+        "target_prefix_template": target_prefix_template if use_target_prefix else "",
+        "disable_eval_during_training": disable_eval_during_training,
+        "skip_final_eval": skip_final_eval,
         "train_rows": len(tokenized["train"]),
-        "eval_rows": len(tokenized["eval"]) if has_eval else 0,
+        "eval_rows": len(tokenized["eval"]) if has_eval_dataset else 0,
         "output_dir": str(output_dir),
         "best_model_dir": str(best_model_dir),
         "best_checkpoint": best_checkpoint,
@@ -259,7 +278,7 @@ def main() -> None:
     print(f"config_path={CONFIG_PATH}")
     print(f"model_ref={model_ref}")
     print(f"train_rows={len(tokenized['train'])}")
-    print(f"eval_rows={len(tokenized['eval']) if has_eval else 0}")
+    print(f"eval_rows={len(tokenized['eval']) if has_eval_dataset else 0}")
     print(f"output_dir={output_dir}")
     print(f"best_model_dir={best_model_dir}")
     print(f"metrics_path={metrics_path}")
