@@ -6,9 +6,14 @@ from pathlib import Path
 from typing import Dict, Iterable, Optional, Set, Tuple
 
 from .adapters.base import ModelAdapter
-from .adapters.opusmt_ctranslate2 import OpusMTCTranslate2Adapter
-from .adapters.transformers_ctranslate2 import M2MCTranslate2Adapter, NLLBCTranslate2Adapter
-from .adapters.transformers import TransformersAdapter, NLLBAdapter, OpusMTAdapter
+from .adapters.transformers import (
+    M2MCTranslate2Adapter,
+    NLLBCTranslate2Adapter,
+    NLLBAdapter,
+    OpusMTCTranslate2Adapter,
+    OpusMTAdapter,
+    TransformersAdapter,
+)
 
 logger = logging.getLogger(__name__)
 
