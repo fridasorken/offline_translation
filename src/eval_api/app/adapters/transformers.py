@@ -265,15 +265,3 @@ class OpusMTAdapter(_BaseCTranslate2Adapter):
         source_token_ids = self.tokenizer.encode(tagged_text)
         source_tokens = self.tokenizer.convert_ids_to_tokens(source_token_ids)
         return self._translate_tokens(source_tokens, None)
-
-
-class M2MCTranslate2Adapter(TransformersAdapter):
-    """Backward-compatible alias for the CT2 M2M adapter."""
-
-
-class NLLBCTranslate2Adapter(NLLBAdapter):
-    """Backward-compatible alias for the CT2 NLLB adapter."""
-
-
-class OpusMTCTranslate2Adapter(OpusMTAdapter):
-    """Backward-compatible alias for the CT2 OPUS adapter."""

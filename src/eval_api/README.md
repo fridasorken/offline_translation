@@ -20,7 +20,7 @@ Edit `models.json` to define model adapters and paths.
 ```json
 {
   "translation-model-1": {
-    "adapter": "opusmt_ct2",
+    "adapter": "opusmt",
     "model_path": "./models/opus-mt-no-en",
     "supported_pairs": [["no", "en"]],
     "num_beams": 4,
@@ -36,9 +36,7 @@ Optional config keys (adapter-specific):
 - `device` ("cpu" or "cuda")
 - `forced_bos_token_id` (int)
 - `local_files_only` (bool)
-
-For `opusmt_ct2`:
-- `ct2_model_path` (optional path for converted CT2 model)
+- `ct2_model_path` (optional path to a converted CT2 model directory)
 - `ct2_cache_dir` (optional cache root for converted CT2 models)
 - `tokenizer_path` (optional tokenizer source, defaults to `model_path`)
 - `quantization` (default: `float32`)
@@ -46,9 +44,10 @@ For `opusmt_ct2`:
 - `inter_threads` (default: `1`)
 - `num_threads` (maps to CT2 `intra_threads`)
 
-Additional CTranslate2 adapters:
-- `m2m_ct2` for M2M100 models
-- `nllb_ct2` for NLLB models
+All runtime adapters are now CT2-backed:
+- `opusmt`
+- `transformers` (used for M2M100)
+- `nllb`
 
 If you want to use a different config path, set:
 
@@ -62,22 +61,21 @@ The eval API can pull your fine-tuned OPUS models directly from Hugging Face on 
 No separate download script is required as long as the model entry has:
 - `model_path` set to a Hugging Face repo id
 - `local_files_only` set to `false`
-- `adapter` set to `opusmt_ct2` (for CTranslate2 runtime)
+- `adapter` set to `opusmt`
 
 These model IDs are configured in `models.json`:
 - `opus-mt-tc-big-en-de-military-v1` -> `MariusBerg/opus-tc-big-en-de-military-v1`
 - `opus-mt-tc-big-en-nob-military` -> `MariusBerg/opus-tc-big-en-nob-military`
 - `opus-mt-tc-big-en-pt-military` -> `MariusBerg/opus-tc-big-en-pt-military`
 - `m2m-100-1.2b` -> `facebook/m2m100_1.2B`
-- `m2m-100-418m-ct2` -> `facebook/m2m100_418M` (CT2 adapter)
-- `m2m-100-1.2b-ct2` -> `facebook/m2m100_1.2B` (CT2 adapter)
-- `nllb-200-distilled-600m-ct2` -> `facebook/nllb-200-distilled-600M` (CT2 adapter)
+- `m2m-100-418m` -> `facebook/m2m100_418M`
+- `nllb-200-distilled-600m` -> `facebook/nllb-200-distilled-600M`
 
-The first request against each OPUS model downloads tokenizer/model files and converts the
+The first request against each model downloads tokenizer/model files and converts the
 checkpoint to CTranslate2 under `src/eval_api/models/ct2/` (or your configured CT2 cache dir).
 Later requests load the converted CT2 model from cache.
 
-When adding a model that has specific configuration requirements, other than what is supplied by the `transformers` adapter, you might need to create a subclass of the `TransformersAdapter` class in `transformers.py` and add it in the functions `_build_adapter` and `_resolve_model_ref` in `registry.py`.
+When adding a model that has specific configuration requirements, extend the adapter logic in `app/adapters/transformers.py` and register the adapter name in `app/registry.py`.
 
 ## Run locally
 
