@@ -6,7 +6,11 @@ from pathlib import Path
 from typing import Dict, Iterable, Optional, Set, Tuple
 
 from .adapters.base import ModelAdapter
-from .adapters.transformers import TransformersAdapter, NLLBAdapter, OpusMTAdapter
+from .adapters.transformers import (
+    NLLBAdapter,
+    OpusMTAdapter,
+    TransformersAdapter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +138,11 @@ class ModelRegistry:
             raise ValueError("model_path must be a string")
 
         local_files_only = bool(adapter_params.get("local_files_only", True))
-        if adapter_name in ("transformers", "nllb", "opusmt"):
+        if adapter_name in (
+            "transformers",
+            "nllb",
+            "opusmt",
+        ):
             candidate = Path(model_path_raw)
             if not candidate.is_absolute():
                 candidate = (BASE_DIR / candidate).resolve()

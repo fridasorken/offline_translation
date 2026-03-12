@@ -1,0 +1,12 @@
+# OS / cache
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# Local training artifacts (large)
+model/
+outputs/
+results/
+
+# Notebook checkpoints
+.ipynb_checkpoints/

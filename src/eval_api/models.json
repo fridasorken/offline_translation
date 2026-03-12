@@ -1,52 +1,166 @@
-  {
-    "opus-mt-en-gmq": {
-      "adapter": "opusmt",
-      "model_path": "Helsinki-NLP/opus-mt-en-gmq",
-      "supported_pairs": [
-        ["en", "nob"],
-        ["en", "nno"]
+{
+  "opus-mt-en-gmq": {
+    "adapter": "opusmt",
+    "model_path": "Helsinki-NLP/opus-mt-en-gmq",
+    "supported_pairs": [
+      [
+        "en",
+        "nob"
       ],
-      "device": "cpu",
-      "local_files_only": false
-    },
-      "opus-mt-en-de": {
-      "adapter": "opusmt",
-      "model_path": "Helsinki-NLP/opus-mt-en-de",
-      "supported_pairs": [
-        ["en", "de"]
+      [
+        "en",
+        "nno"
+      ]
+    ],
+    "device": "cpu",
+    "local_files_only": false
+  },
+  "opus-mt-tc-big-en-gmq": {
+    "adapter": "opusmt",
+    "model_path": "Helsinki-NLP/opus-mt-tc-big-en-gmq",
+    "supported_pairs": [
+      [
+        "en",
+        "nob"
       ],
-      "device": "cpu",
-      "local_files_only": false
-    },
-    "opus-mt-tc-big-en-pt": {
-      "adapter": "opusmt",
-      "model_path": "Helsinki-NLP/opus-mt-tc-big-en-pt",
-      "supported_pairs": [
-        ["en", "pt"]
+      [
+        "en",
+        "nno"
+      ]
+    ],
+    "device": "cpu",
+    "local_files_only": false
+  },
+  "opus-mt-tc-big-en-nob-military": {
+    "adapter": "opusmt",
+    "model_path": "MariusBerg/opus-tc-big-en-nob-military",
+    "supported_pairs": [
+      [
+        "en",
+        "nob"
+      ]
+    ],
+    "device": "cpu",
+    "local_files_only": false
+  },
+  "opus-mt-en-de": {
+    "adapter": "opusmt",
+    "model_path": "Helsinki-NLP/opus-mt-en-de",
+    "supported_pairs": [
+      [
+        "en",
+        "de"
+      ]
+    ],
+    "device": "cpu",
+    "local_files_only": false
+  },
+  "opus-mt-tc-big-en-de": {
+    "adapter": "opusmt",
+    "model_path": "gsarti/opus-mt-tc-big-en-de",
+    "supported_pairs": [
+      [
+        "en",
+        "de"
+      ]
+    ],
+    "device": "cpu",
+    "local_files_only": false
+  },
+  "opus-mt-tc-big-en-de-military-v1": {
+    "adapter": "opusmt",
+    "model_path": "MariusBerg/opus-tc-big-en-de-military-v1",
+    "supported_pairs": [
+      [
+        "en",
+        "de"
+      ]
+    ],
+    "device": "cpu",
+    "local_files_only": false
+  },
+  "opus-mt-tc-big-en-pt": {
+    "adapter": "opusmt",
+    "model_path": "Helsinki-NLP/opus-mt-tc-big-en-pt",
+    "supported_pairs": [
+      [
+        "en",
+        "pt"
+      ]
+    ],
+    "device": "cpu",
+    "local_files_only": false
+  },
+  "opus-mt-tc-big-en-pt-military": {
+    "adapter": "opusmt",
+    "model_path": "MariusBerg/opus-tc-big-en-pt-military",
+    "supported_pairs": [
+      [
+        "en",
+        "pt"
+      ]
+    ],
+    "device": "cpu",
+    "local_files_only": false
+  },
+  "m2m-100-418m": {
+    "adapter": "transformers",
+    "model_path": "facebook/m2m100_418M",
+    "supported_pairs": [
+      [
+        "en",
+        "de"
       ],
-      "device": "cpu",
-      "local_files_only": false
-    },
-    "m2m-100-418m": {
-      "adapter": "transformers",
-      "model_path": "facebook/m2m100_418M",
-      "supported_pairs": [
-        ["en", "de"],
-        ["en", "no"],
-        ["en", "pt"]
+      [
+        "en",
+        "no"
       ],
-      "device": "cpu",
-      "local_files_only": false
-    },
-    "nllb-200-distilled-600m": {
-      "adapter": "nllb",
-      "model_path": "facebook/nllb-200-distilled-600M",
-      "supported_pairs": [
-        ["eng_Latn", "deu_Latn"],
-        ["eng_Latn", "nob_Latn"],
-        ["eng_Latn", "por_Latn"]
+      [
+        "en",
+        "pt"
+      ]
+    ],
+    "device": "cpu",
+    "local_files_only": false
+  },
+  "m2m-100-1.2b": {
+    "adapter": "transformers",
+    "model_path": "facebook/m2m100_1.2B",
+    "supported_pairs": [
+      [
+        "en",
+        "de"
       ],
-      "device": "cpu",
-      "local_files_only": false
-    }
+      [
+        "en",
+        "no"
+      ],
+      [
+        "en",
+        "pt"
+      ]
+    ],
+    "device": "cpu",
+    "local_files_only": false
+  },
+  "nllb-200-distilled-600m": {
+    "adapter": "nllb",
+    "model_path": "facebook/nllb-200-distilled-600M",
+    "supported_pairs": [
+      [
+        "eng_Latn",
+        "deu_Latn"
+      ],
+      [
+        "eng_Latn",
+        "nob_Latn"
+      ],
+      [
+        "eng_Latn",
+        "por_Latn"
+      ]
+    ],
+    "device": "cpu",
+    "local_files_only": false
   }
+}

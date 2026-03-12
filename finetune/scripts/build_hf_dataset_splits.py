@@ -1,0 +1,140 @@
+from __future__ import annotations
+
+import json
+import random
+from collections import defaultdict
+from pathlib import Path
+
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+CONFIG_PATH = BASE_DIR / "config" / "finetune_config.json"
+
+
+def _resolve_path(path_value: str) -> Path:
+    candidate = Path(path_value)
+    if candidate.is_absolute():
+        return candidate
+    return (BASE_DIR / candidate).resolve()
+
+
+def _load_config() -> tuple[dict, dict, dict]:
+    raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    return raw["paths"], raw["dataset"], raw["training"]
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    rows: list[dict] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            rows.append(json.loads(stripped))
+    return rows
+
+
+def _write_jsonl(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def main() -> None:
+    path_cfg, dataset_cfg, training_cfg = _load_config()
+    train_ready_path = _resolve_path(path_cfg["train_ready_jsonl"])
+    train_path = _resolve_path(path_cfg["hf_train_jsonl"])
+    eval_path = _resolve_path(path_cfg["hf_eval_jsonl"])
+    test_path = _resolve_path(path_cfg["hf_test_jsonl"])
+    report_path = _resolve_path(path_cfg["split_report_json"])
+
+    eval_ratio = float(dataset_cfg.get("eval_ratio", 0.05))
+    test_ratio = float(dataset_cfg.get("test_ratio", 0.0))
+    seed = int(dataset_cfg.get("random_seed", 42))
+
+    rows = _read_jsonl(train_ready_path)
+    if not rows:
+        raise RuntimeError(f"Empty train-ready dataset: {train_ready_path}")
+
+    by_conversation: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        by_conversation[str(row.get("conversation_id", "conv_missing"))].append(row)
+
+    conversation_ids = list(by_conversation.keys())
+    random.Random(seed).shuffle(conversation_ids)
+
+    total_rows = len(rows)
+    target_eval_rows = int(total_rows * eval_ratio)
+    target_test_rows = int(total_rows * test_ratio)
+
+    eval_conversations: set[str] = set()
+    test_conversations: set[str] = set()
+    eval_rows = 0
+    test_rows = 0
+
+    for conversation_id in conversation_ids:
+        conv_size = len(by_conversation[conversation_id])
+        if test_rows < target_test_rows:
+            test_conversations.add(conversation_id)
+            test_rows += conv_size
+        elif eval_rows < target_eval_rows:
+            eval_conversations.add(conversation_id)
+            eval_rows += conv_size
+
+    train_rows: list[dict] = []
+    eval_rows_out: list[dict] = []
+    test_rows_out: list[dict] = []
+
+    for conversation_id in conversation_ids:
+        bucket = by_conversation[conversation_id]
+        for row in bucket:
+            item = {
+                "item_id": row["item_id"],
+                "conversation_id": row["conversation_id"],
+                "turn_index": row["turn_index"],
+                "source": row["source"],
+                "reference": row["reference"],
+                "domain": row["domain"],
+                "risk_level": row["risk_level"],
+                "model_ref": training_cfg["model_ref"],
+            }
+            if conversation_id in test_conversations:
+                test_rows_out.append(item)
+            elif conversation_id in eval_conversations:
+                eval_rows_out.append(item)
+            else:
+                train_rows.append(item)
+
+    _write_jsonl(train_path, train_rows)
+    _write_jsonl(eval_path, eval_rows_out)
+    _write_jsonl(test_path, test_rows_out)
+
+    report = {
+        "config_path": str(CONFIG_PATH),
+        "input_train_ready_path": str(train_ready_path),
+        "train_path": str(train_path),
+        "eval_path": str(eval_path),
+        "test_path": str(test_path),
+        "seed": seed,
+        "total_rows": total_rows,
+        "train_rows": len(train_rows),
+        "eval_rows": len(eval_rows_out),
+        "test_rows": len(test_rows_out),
+        "eval_ratio_effective": round(len(eval_rows_out) / total_rows, 6),
+        "test_ratio_effective": round(len(test_rows_out) / total_rows, 6),
+        "train_ratio_effective": round(len(train_rows) / total_rows, 6),
+    }
+
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    print(f"config_path={CONFIG_PATH}")
+    print(f"train_ready_path={train_ready_path}")
+    print(f"train_rows={len(train_rows)}")
+    print(f"eval_rows={len(eval_rows_out)}")
+    print(f"test_rows={len(test_rows_out)}")
+    print(f"split_report={report_path}")
+
+
+if __name__ == "__main__":
+    main()
