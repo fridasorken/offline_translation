@@ -278,7 +278,7 @@ The first run will download to the Hugging Face cache. After that, you can switc
 ## Documentation generation
 
 This project is configured to use Sphinx docs generation.
-To generate HTML docs files, run the following command from the `eval_api` directory:
+To generate HTML docs files, run the following command from the `eval_api/docs/` directory:
 
 ### Linux/MacOS
 ```bash
@@ -287,7 +287,7 @@ make html
 
 ### Windows
 ```bash
-make html
+./make.bat html
 ```
 
 You can then view the docs by opening the generated `index.html` file from `docs/_build/html/` in a browser.
