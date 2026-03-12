@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
+import ctranslate2
 from transformers import AutoTokenizer
 
 from .base import ModelAdapter
@@ -47,7 +48,6 @@ class _BaseCTranslate2Adapter(ModelAdapter):
         self.inter_threads = inter_threads
         self.force_conversion = force_conversion
 
-        self._ctranslate2 = self._require_ctranslate2()
         self.device = self._resolve_device(device)
 
         resolved_tokenizer_path = tokenizer_path or model_path
@@ -65,20 +65,10 @@ class _BaseCTranslate2Adapter(ModelAdapter):
         self._ensure_converted_model()
         self.translator = self._load_translator()
 
-    def _require_ctranslate2(self):
-        try:
-            import ctranslate2  # type: ignore
-        except ImportError as exc:
-            raise RuntimeError(
-                "CTranslate2 is required for CT2-backed translation adapters. "
-                "Install it in this environment (for example `uv add ctranslate2`)."
-            ) from exc
-        return ctranslate2
-
     def _resolve_device(self, requested_device: str) -> str:
         if requested_device == "cuda":
             try:
-                if self._ctranslate2.get_cuda_device_count() > 0:
+                if ctranslate2.get_cuda_device_count() > 0:
                     return "cuda"
                 logger.warning("CUDA requested for CT2 but not available. Falling back to CPU.")
             except Exception:
@@ -130,7 +120,7 @@ class _BaseCTranslate2Adapter(ModelAdapter):
         self.ct2_model_dir.mkdir(parents=True, exist_ok=True)
         force_convert = self.force_conversion or self.ct2_model_dir.exists()
 
-        converter = self._ctranslate2.converters.TransformersConverter(self.model_path)
+        converter = ctranslate2.converters.TransformersConverter(self.model_path)
         converter.convert(
             str(self.ct2_model_dir),
             quantization=self.quantization,
@@ -152,7 +142,7 @@ class _BaseCTranslate2Adapter(ModelAdapter):
             self.device,
             self.compute_type,
         )
-        return self._ctranslate2.Translator(str(self.ct2_model_dir), **translator_kwargs)
+        return ctranslate2.Translator(str(self.ct2_model_dir), **translator_kwargs)
 
     def _prepare_tokenizer_languages(self, src_lang: str, tgt_lang: str) -> tuple[object, object]:
         prior_src_lang = _UNSET
