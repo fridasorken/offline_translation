@@ -334,6 +334,9 @@ def translate(request: TranslateRequest) -> TranslateResponse:
 def evaluate(request: EvaluateRequest) -> EvaluateResponse:
     registry: ModelRegistry = app.state.registry
 
+    # Eval uses isolated worker processes, so clear any translate-side cache first.
+    registry.clear_adapter_cache()
+
     try:
         registry.get_config(request.model_id)
     except KeyError:

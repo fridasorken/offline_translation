@@ -1,6 +1,8 @@
+import gc
 import json
 import logging
 import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Set, Tuple
@@ -33,6 +35,7 @@ class ModelRegistry:
         self.config_path = config_path or self._resolve_config_path()
         self._configs: Dict[str, ModelConfig] = {}
         self._adapters: Dict[str, ModelAdapter] = {}
+        self._cache_lock = threading.RLock()
 
     def load(self) -> None:
         logger.info("Loading model registry from %s", self.config_path)
@@ -70,16 +73,28 @@ class ModelRegistry:
             )
 
         self._configs = configs
-        self._adapters = {}   # clear any old cache
+        self.clear_adapter_cache()
 
     def get_adapter(self, model_id: str) -> ModelAdapter:
-        if model_id in self._adapters:
-            return self._adapters[model_id]
+        with self._cache_lock:
+            if model_id in self._adapters:
+                return self._adapters[model_id]
 
-        config = self.get_config(model_id)
-        adapter = self._build_adapter(config)
-        self._adapters[model_id] = adapter
-        return adapter
+            # Keep at most one loaded model in the main process.
+            if self._adapters:
+                self.clear_adapter_cache()
+
+            config = self.get_config(model_id)
+            adapter = self._build_adapter(config)
+            self._adapters[model_id] = adapter
+            return adapter
+
+    def clear_adapter_cache(self) -> None:
+        with self._cache_lock:
+            if not self._adapters:
+                return
+            self._adapters.clear()
+        gc.collect()
 
 
     def get_config(self, model_id: str) -> ModelConfig:
