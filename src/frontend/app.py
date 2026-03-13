@@ -270,6 +270,37 @@ def evaluate_translations(request: EvaluateRequest) -> EvaluateResponse:
     )
 
 
+def build_distribution_frame(
+    values: list[float],
+    value_label: str,
+    bins: int = 8,
+) -> pd.DataFrame:
+    """Build a smoothed histogram table for Streamlit line/area charts."""
+    if not values:
+        return pd.DataFrame(columns=[value_label, "Density"])
+
+    series = pd.Series(values, dtype="float64")
+    if series.nunique() <= 1:
+        return pd.DataFrame(
+            {
+                value_label: [float(series.iloc[0])],
+                "Density": [1.0],
+            }
+        )
+
+    bucket_count = max(4, min(bins, len(series)))
+    buckets = pd.cut(series, bins=bucket_count, include_lowest=True)
+    counts = buckets.value_counts(sort=False)
+    smoothed = counts.rolling(window=3, center=True, min_periods=1).mean()
+    total = float(smoothed.sum()) or 1.0
+    return pd.DataFrame(
+        {
+            value_label: [float(interval.mid) for interval in smoothed.index],
+            "Density": (smoothed / total).values,
+        }
+    )
+
+
 def init_session_state():
     """Initialise session state variables."""
     defaults = {
@@ -951,17 +982,22 @@ def main():
                     # Display aggregate metrics
                     st.write("**Aggregate metrics**")
 
-                    # Group aggregates by metric type
-                    metric_names = {key.replace("_mean", "") for key in eval_resp.aggregates if "_mean" in key}
+                    # Only show translation-quality metrics here, not profiling aggregates.
+                    metric_names = sorted(
+                        {
+                            metric_name
+                            for item in eval_resp.results
+                            for metric_name in item.metrics.keys()
+                        }
+                    )
 
                     # Display metrics in columns
                     num_metrics = len(metric_names)
                     if num_metrics > 0:
                         cols = st.columns(min(num_metrics, 4))
-                        for idx, metric_name in enumerate(sorted(metric_names)):
+                        for idx, metric_name in enumerate(metric_names):
                             with cols[idx % len(cols)]:
                                 mean_val = eval_resp.aggregates.get(f"{metric_name}_mean", 0.0)
-                                median_val = eval_resp.aggregates.get(f"{metric_name}_median", 0.0)
                                 stdev_val = eval_resp.aggregates.get(f"{metric_name}_stdev", 0.0)
 
                                 st.metric(
@@ -975,21 +1011,16 @@ def main():
                     st.divider()
                     st.write("**Performance Metrics**")
 
-                    perf_cols = st.columns(4)
+                    perf_cols = st.columns(3)
                     with perf_cols[0]:
                         st.metric("Avg Latency", f"{eval_resp.average_latency_ms:.1f} ms")
                     with perf_cols[1]:
                         cpu_mean = eval_resp.aggregates.get("cpu_percent_per_core_mean")
                         if cpu_mean is not None:
-                            st.metric("Avg CPU %", f"{cpu_mean:.1f}%")
+                            st.metric("Avg CPU % / core", f"{cpu_mean:.1f}%")
                     with perf_cols[2]:
-                        ram_mean = eval_resp.aggregates.get("ram_mean_mb_mean")
-                        if ram_mean is not None:
-                            st.metric("Avg RAM", f"{ram_mean:.1f} MB")
-                    with perf_cols[3]:
-                        ram_peak = eval_resp.aggregates.get("ram_peak_mb_mean")
-                        if ram_peak is not None:
-                            st.metric("Peak RAM", f"{ram_peak:.1f} MB")
+                        if eval_resp.baseline_rss_mb is not None:
+                            st.metric("RAM Footprint", f"{eval_resp.baseline_rss_mb:.1f} MB")
 
                     # Per-item results table
                     st.divider()
@@ -1011,10 +1042,7 @@ def main():
 
                         # Add resource metrics
                         if item.cpu_percent_per_core is not None:
-                            row_data["cpu_%"] = f"{item.cpu_percent_per_core:.1f}"
-                        if item.ram_mean_mb is not None:
-                            row_data["ram_mb"] = f"{item.ram_mean_mb:.1f}"
-
+                            row_data["cpu_%/core"] = f"{item.cpu_percent_per_core:.1f}"
                         results_data.append(row_data)
 
                     results_df = pd.DataFrame(results_data)
@@ -1067,26 +1095,46 @@ def main():
                         st.divider()
                         st.subheader("Visualizations")
 
-                        # Latency distribution
-                        st.write("**Latency Distribution**")
-                        latency_data = pd.DataFrame({
-                            "Item": [item.item_id or f"Item {i+1}" for i, item in enumerate(eval_resp.results)],
-                            "Latency (ms)": [item.latency_ms for item in eval_resp.results]
-                        })
-                        st.bar_chart(latency_data.set_index("Item"))
+                        if metric_names:
+                            st.write("**Quality Overview**")
+                            quality_overview = pd.DataFrame(
+                                {
+                                    "Metric": [metric_name.upper() for metric_name in metric_names],
+                                    "Mean score": [
+                                        eval_resp.aggregates.get(f"{metric_name}_mean", 0.0)
+                                        for metric_name in metric_names
+                                    ],
+                                }
+                            )
+                            st.bar_chart(quality_overview.set_index("Metric"))
 
-                        # Metric distributions
+                        st.write("**Latency Distribution**")
+                        latency_curve = build_distribution_frame(
+                            [item.latency_ms for item in eval_resp.results],
+                            "Latency (ms)",
+                        )
+                        st.area_chart(latency_curve.set_index("Latency (ms)"))
+
+                        st.write("**Latency vs Source Length**")
+                        latency_scatter = pd.DataFrame(
+                            {
+                                "source_words": [len(item.source.split()) for item in eval_resp.results],
+                                "latency_ms": [item.latency_ms for item in eval_resp.results],
+                            }
+                        )
+                        st.scatter_chart(latency_scatter, x="source_words", y="latency_ms")
+
                         if metric_names:
                             st.write("**Metric Distributions**")
-                            metric_tabs = st.tabs(list(sorted(metric_names)))
+                            metric_tabs = st.tabs(metric_names)
 
-                            for idx, metric_name in enumerate(sorted(metric_names)):
+                            for idx, metric_name in enumerate(metric_names):
                                 with metric_tabs[idx]:
-                                    metric_data = pd.DataFrame({
-                                        "Item": [item.item_id or f"Item {i+1}" for i, item in enumerate(eval_resp.results)],
-                                        metric_name.upper(): [item.metrics.get(metric_name, 0.0) for item in eval_resp.results]
-                                    })
-                                    st.bar_chart(metric_data.set_index("Item"))
+                                    metric_curve = build_distribution_frame(
+                                        [item.metrics.get(metric_name, 0.0) for item in eval_resp.results],
+                                        metric_name.upper(),
+                                    )
+                                    st.area_chart(metric_curve.set_index(metric_name.upper()))
 
             except Exception as e:
                 st.error(f"Error reading CSV file: {e}")
