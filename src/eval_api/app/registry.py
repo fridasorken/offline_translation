@@ -32,30 +32,12 @@ class ModelConfig:
 
 class ModelRegistry:
     def __init__(self, config_path: Optional[Path] = None) -> None:
-        """Create a model registry backed by `models.json`.
-
-        Parameters
-        ----------
-        config_path : Optional[Path], optional
-            Explicit path to the models config file. If omitted, the path is
-            resolved from `MODELS_CONFIG_PATH` or defaults to `DEFAULT_MODELS_CONFIG`.
-        """
         self.config_path = config_path or self._resolve_config_path()
         self._configs: Dict[str, ModelConfig] = {}
         self._adapters: Dict[str, ModelAdapter] = {}
         self._cache_lock = threading.RLock()
 
     def load(self) -> None:
-        """Load and validate model configurations from disk.
-
-        Raises
-        ------
-        ValueError
-            If the config file top-level is not an object.
-        ValueError
-            If a model config entry is not an object, lacks required fields, or has
-            invalid `supported_pairs` format.
-        """
         logger.info("Loading model registry from %s", self.config_path)
         with self.config_path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
@@ -94,107 +76,43 @@ class ModelRegistry:
         self.clear_adapter_cache()
 
     def get_adapter(self, model_id: str) -> ModelAdapter:
-        """Return a cached adapter instance for a model, building it on first use.
+        with self._cache_lock:
+            if model_id in self._adapters:
+                return self._adapters[model_id]
 
-        Parameters
-        ----------
-        model_id : str
-            Model identifier from the loaded configuration.
+            # Keep at most one loaded model in the main process.
+            if self._adapters:
+                self.clear_adapter_cache()
 
-        Returns
-        -------
-        ModelAdapter
-            Adapter instance configured for `model_id`.
+            config = self.get_config(model_id)
+            adapter = self._build_adapter(config)
+            self._adapters[model_id] = adapter
+            return adapter
 
-        Raises
-        ------
-        KeyError
-            If `model_id` is unknown.
-        ValueError
-            If the configured adapter type is unsupported.
-        """
-        if model_id in self._adapters:
-            return self._adapters[model_id]
-
-        config = self.get_config(model_id)
-        adapter = self._build_adapter(config)
-        self._adapters[model_id] = adapter
-        return adapter
+    def clear_adapter_cache(self) -> None:
+        with self._cache_lock:
+            if not self._adapters:
+                return
+            self._adapters.clear()
+        gc.collect()
 
 
     def get_config(self, model_id: str) -> ModelConfig:
-        """Get resolved configuration for a model id.
-
-        Parameters
-        ----------
-        model_id : str
-            Model identifier from the loaded configuration.
-
-        Returns
-        -------
-        ModelConfig
-            Immutable model configuration entry.
-
-        Raises
-        ------
-        KeyError
-            If `model_id` is not present in the registry.
-        """
         try:
             return self._configs[model_id]
         except KeyError as exc:
             raise KeyError(f"Unknown model_id: {model_id}") from exc
 
     def is_supported_pair(self, model_id: str, src_lang: str, tgt_lang: str) -> bool:
-        """Check whether a source-target pair is allowed for a model.
-
-        Parameters
-        ----------
-        model_id : str
-            Model identifier.
-        src_lang : str
-            Source language code.
-        tgt_lang : str
-            Target language code.
-
-        Returns
-        -------
-        bool
-            `True` if the pair is supported, otherwise `False`.
-        """
         config = self.get_config(model_id)
         if not config.supported_pairs:
             return True
         return (src_lang, tgt_lang) in config.supported_pairs
 
     def list_models(self) -> Iterable[str]:
-        """List all configured model ids currently loaded.
-
-        Returns
-        -------
-        Iterable[str]
-            Iterable view of model identifiers.
-        """
         return self._configs.keys()
 
     def _build_adapter(self, config: ModelConfig) -> ModelAdapter:
-        """Instantiate an adapter from a resolved model config.
-
-        Parameters
-        ----------
-        config : ModelConfig
-            Configuration entry describing adapter type, model reference, and params.
-
-        Returns
-        -------
-        ModelAdapter
-            Concrete adapter instance for runtime translation.
-
-        Raises
-        ------
-        ValueError
-            If `config.adapter` is not one of the supported adapter names.
-        """
         if config.adapter == "transformers":
             return TransformersAdapter(config.model_path, **config.adapter_params)
         elif config.adapter == "nllb":
@@ -205,23 +123,6 @@ class ModelRegistry:
 
     @staticmethod
     def _parse_supported_pairs(raw_pairs: Optional[Iterable[Iterable[str]]]) -> Set[Tuple[str, str]]:
-        """Normalize `supported_pairs` from config into a set of `(src, tgt)` tuples.
-
-        Parameters
-        ----------
-        raw_pairs : Optional[Iterable[Iterable[str]]]
-            Raw value from config, expected as iterable of two-item pairs.
-
-        Returns
-        -------
-        Set[Tuple[str, str]]
-            Normalized set of language pairs. Empty set means unrestricted pairs.
-
-        Raises
-        ------
-        ValueError
-            If any entry is not a 2-item list.
-        """
         pairs: Set[Tuple[str, str]] = set()
         if not raw_pairs:
             return pairs
@@ -234,13 +135,6 @@ class ModelRegistry:
 
     @staticmethod
     def _resolve_config_path() -> Path:
-        """Resolve the models config path from environment or project default.
-
-        Returns
-        -------
-        Path
-            Absolute or normalized path to the models config file.
-        """
         override = os.getenv(MODELS_CONFIG_ENV)
         if not override:
             return DEFAULT_MODELS_CONFIG
@@ -255,29 +149,6 @@ class ModelRegistry:
         model_path_raw: object,
         adapter_params: Dict[str, object],
     ) -> str:
-        """Resolve and validate model reference for adapter initialization.
-
-        Parameters
-        ----------
-        adapter_name : str
-            Adapter key from model config.
-        model_path_raw : object
-            Raw `model_path` value from config.
-        adapter_params : Dict[str, object]
-            Adapter-specific parameters, including optional `local_files_only`.
-
-        Returns
-        -------
-        str
-            Resolved local filesystem path, or original remote model id when allowed.
-
-        Raises
-        ------
-        ValueError
-            If `model_path_raw` is not a string.
-        FileNotFoundError
-            If a required local model path does not exist.
-        """
         if not isinstance(model_path_raw, str):
             raise ValueError("model_path must be a string")
 
