@@ -37,39 +37,6 @@ class _BaseCTranslate2Adapter(ModelAdapter):
         inter_threads: int = 1,
         force_conversion: bool = False,
     ) -> None:
-        """Initialize a CT2-backed adapter and load tokenizer + translator.
-
-        Parameters
-        ----------
-        model_path : str
-            Hugging Face model id or local path to the source model.
-        device : str, optional
-            Execution device for CTranslate2, by default `"cpu"`.
-        num_beams : int, optional
-            Beam size used during decoding, by default 4.
-        max_new_tokens : int, optional
-            Maximum decoding length in generated tokens, by default 256.
-        forced_bos_token_id : Optional[int], optional
-            Optional forced BOS token id for target language control, by default None.
-        local_files_only : bool, optional
-            If True, do not allow remote model/tokenizer resolution, by default True.
-        num_threads : Optional[int], optional
-            Optional CT2 intra-op thread count (`intra_threads`), by default None.
-        tokenizer_path : Optional[str], optional
-            Optional tokenizer source. Defaults to `model_path` when omitted.
-        compute_type : str, optional
-            CT2 compute type (for example `default`, `float32`, `int8`), by default `"default"`.
-        ct2_model_path : Optional[str], optional
-            Optional explicit path to an already converted CT2 model directory.
-        ct2_cache_dir : Optional[str], optional
-            Optional cache root used for on-demand CT2 conversion output.
-        quantization : Optional[str], optional
-            Quantization mode used during CT2 conversion, by default `"float32"`.
-        inter_threads : int, optional
-            CT2 inter-op thread count (`inter_threads`), by default 1.
-        force_conversion : bool, optional
-            If True, force reconversion even when a cached CT2 model exists, by default False.
-        """
         self.model_path = model_path
         self.local_files_only = local_files_only
         self.num_beams = num_beams
@@ -99,19 +66,6 @@ class _BaseCTranslate2Adapter(ModelAdapter):
         self.translator = self._load_translator()
 
     def _resolve_device(self, requested_device: str) -> str:
-        """Resolve runtime device with safe fallback behavior.
-
-        Parameters
-        ----------
-        requested_device : str
-            Requested device string from model config.
-
-        Returns
-        -------
-        str
-            A supported CT2 device (`"cpu"`, `"cuda"`, or `"auto"`). Falls back to `"cpu"` when invalid
-            or when CUDA is requested but unavailable.
-        """
         if requested_device == "cuda":
             try:
                 if ctranslate2.get_cuda_device_count() > 0:
@@ -127,18 +81,6 @@ class _BaseCTranslate2Adapter(ModelAdapter):
 
     @staticmethod
     def _slug(value: str) -> str:
-        """Convert a string into a filesystem-safe cache key.
-
-        Parameters
-        ----------
-        value : str
-            Input value to normalize.
-
-        Returns
-        -------
-        str
-            Slugified value containing only alphanumerics, underscore, dot, and dash.
-        """
         return re.sub(r"[^a-zA-Z0-9_.-]+", "_", value)
 
     def _resolve_ct2_model_dir(
@@ -147,22 +89,6 @@ class _BaseCTranslate2Adapter(ModelAdapter):
         ct2_model_path: Optional[str],
         ct2_cache_dir: Optional[str],
     ) -> Path:
-        """Resolve which CT2 model directory should be used.
-
-        Parameters
-        ----------
-        model_path : str
-            Source model reference (local path or HF id).
-        ct2_model_path : Optional[str]
-            Explicit CT2 model directory override.
-        ct2_cache_dir : Optional[str]
-            Optional CT2 cache root directory.
-
-        Returns
-        -------
-        Path
-            Resolved CT2 model directory path.
-        """
         if ct2_model_path:
             candidate = Path(ct2_model_path)
             if not candidate.is_absolute():
@@ -179,14 +105,6 @@ class _BaseCTranslate2Adapter(ModelAdapter):
         return cache_root / self._slug(model_path)
 
     def _ensure_converted_model(self) -> None:
-        """Ensure a CT2 model exists, converting from Transformers format if needed.
-
-        Raises
-        ------
-        FileNotFoundError
-            Raised when conversion requires local files but `model_path` does not exist and
-            `local_files_only=True`.
-        """
         model_bin = self.ct2_model_dir / "model.bin"
         if model_bin.exists() and not self.force_conversion:
             logger.info("Using cached CT2 model: %s", self.ct2_model_dir)
@@ -210,13 +128,6 @@ class _BaseCTranslate2Adapter(ModelAdapter):
         )
 
     def _load_translator(self):
-        """Instantiate and return a CTranslate2 translator.
-
-        Returns
-        -------
-        ctranslate2.Translator
-            Configured translator bound to the resolved CT2 model directory.
-        """
         translator_kwargs = {
             "device": self.device,
             "compute_type": self.compute_type,
@@ -234,21 +145,6 @@ class _BaseCTranslate2Adapter(ModelAdapter):
         return ctranslate2.Translator(str(self.ct2_model_dir), **translator_kwargs)
 
     def _prepare_tokenizer_languages(self, src_lang: str, tgt_lang: str) -> tuple[object, object]:
-        """Set tokenizer language attributes before tokenization.
-
-        Parameters
-        ----------
-        src_lang : str
-            Source language code.
-        tgt_lang : str
-            Target language code.
-
-        Returns
-        -------
-        tuple[object, object]
-            Previous `(src_lang, tgt_lang)` tokenizer values. `_UNSET` is used for attributes that
-            are not present on the tokenizer.
-        """
         prior_src_lang = _UNSET
         prior_tgt_lang = _UNSET
 
@@ -263,33 +159,12 @@ class _BaseCTranslate2Adapter(ModelAdapter):
         return prior_src_lang, prior_tgt_lang
 
     def _restore_tokenizer_languages(self, prior_src_lang: object, prior_tgt_lang: object) -> None:
-        """Restore tokenizer language attributes captured before translation.
-
-        Parameters
-        ----------
-        prior_src_lang : object
-            Previous source language attribute value or `_UNSET`.
-        prior_tgt_lang : object
-            Previous target language attribute value or `_UNSET`.
-        """        
         if prior_src_lang is not _UNSET and hasattr(self.tokenizer, "src_lang"):
             self.tokenizer.src_lang = prior_src_lang
         if prior_tgt_lang is not _UNSET and hasattr(self.tokenizer, "tgt_lang"):
             self.tokenizer.tgt_lang = prior_tgt_lang
 
     def _resolve_target_lang_id(self, tgt_lang: str) -> Optional[int]:
-        """Resolve target language token id for prefix-based constrained decoding.
-
-        Parameters
-        ----------
-        tgt_lang : str
-            Target language code or token key.
-
-        Returns
-        -------
-        Optional[int]
-            Resolved token id, or None if no reliable mapping is found.
-        """        
         if self.forced_bos_token_id is not None:
             return int(self.forced_bos_token_id)
 
@@ -319,19 +194,6 @@ class _BaseCTranslate2Adapter(ModelAdapter):
         return None
 
     def _resolve_target_prefix(self, tgt_lang: str) -> Optional[list[str]]:
-        """Build CT2 `target_prefix` tokens for the selected target language.
-
-        Parameters
-        ----------
-        tgt_lang : str
-            Target language code.
-
-        Returns
-        -------
-        Optional[list[str]]
-            A single-token prefix list for CT2 decoding, or None when target language id
-            cannot be resolved.
-        """
         target_lang_id = self._resolve_target_lang_id(tgt_lang)
         if target_lang_id is None:
             return None
@@ -344,20 +206,6 @@ class _BaseCTranslate2Adapter(ModelAdapter):
         return [token]
 
     def _translate_tokens(self, source_tokens: list[str], target_prefix: Optional[list[str]]) -> str:
-        """Run CT2 translation on tokenized input and decode to text.
-
-        Parameters
-        ----------
-        source_tokens : list[str]
-            Tokenized source sequence.
-        target_prefix : Optional[list[str]]
-            Optional target prefix token sequence used to control decoding language.
-
-        Returns
-        -------
-        str
-            Decoded translated text.
-        """
         translate_kwargs = {
             "beam_size": self.num_beams,
             "max_decoding_length": self.max_new_tokens,
@@ -371,22 +219,6 @@ class _BaseCTranslate2Adapter(ModelAdapter):
         return self.tokenizer.decode(hypothesis_ids, skip_special_tokens=True).strip()
 
     def translate(self, src_lang: str, tgt_lang: str, text: str) -> str:
-        """Translate a single text string from source to target language.
-
-        Parameters
-        ----------
-        src_lang : str
-            Source language code.
-        tgt_lang : str
-            Target language code.
-        text : str
-            Input text to translate.
-
-        Returns
-        -------
-        str
-            Translated output text.
-        """
         prior_src_lang, prior_tgt_lang = self._prepare_tokenizer_languages(src_lang, tgt_lang)
         try:
             source_token_ids = self.tokenizer.encode(text)
@@ -397,18 +229,6 @@ class _BaseCTranslate2Adapter(ModelAdapter):
             self._restore_tokenizer_languages(prior_src_lang, prior_tgt_lang)
 
     def count_tokens(self, text: str) -> int:
-        """Count tokenizer tokens for throughput reporting.
-
-        Parameters
-        ----------
-        text : str
-            Input text.
-
-        Returns
-        -------
-        int
-            Number of tokenizer tokens without special tokens.
-        """
         return len(self.tokenizer.encode(text, add_special_tokens=False))
 
 
@@ -420,20 +240,6 @@ class NLLBAdapter(_BaseCTranslate2Adapter):
     """CT2-backed adapter for NLLB models."""
 
     def _prepare_tokenizer_languages(self, src_lang: str, tgt_lang: str) -> tuple[object, object]:
-        """Set only source language on NLLB tokenizer.
-
-        Parameters
-        ----------
-        src_lang : str
-            Source language code.
-        tgt_lang : str
-            Target language code.
-
-        Returns
-        -------
-        tuple[object, object]
-            Previous source language value and `_UNSET` for target language.
-        """
         prior_src_lang = _UNSET
         if hasattr(self.tokenizer, "src_lang"):
             prior_src_lang = getattr(self.tokenizer, "src_lang")
@@ -445,22 +251,6 @@ class OpusMTAdapter(_BaseCTranslate2Adapter):
     """CT2-backed adapter for OPUS models using inline target-language tags."""
 
     def translate(self, src_lang: str, tgt_lang: str, text: str) -> str:
-        """Translate text with OPUS-style inline target-language tags.
-
-        Parameters
-        ----------
-        src_lang : str
-            Source language code.
-        tgt_lang : str
-            Target language code inserted into the OPUS control tag.
-        text : str
-            Input text to translate.
-
-        Returns
-        -------
-        str
-            Translated output text.
-        """
         tagged_text = f">>{tgt_lang}<< {text}"
         source_token_ids = self.tokenizer.encode(tagged_text)
         source_tokens = self.tokenizer.convert_ids_to_tokens(source_token_ids)
