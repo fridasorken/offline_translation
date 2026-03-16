@@ -26,6 +26,19 @@ class CometScorer:
         gpus: int,
         num_workers: int,
     ) -> None:
+        """Create a lazy-loading COMET scorer wrapper.
+
+        Parameters
+        ----------
+        model_name_or_path : str
+            Local checkpoint path or remote COMET model name.
+        batch_size : int
+            Batch size passed to COMET `predict`.
+        gpus : int
+            GPU count/device argument passed to COMET `predict`.
+        num_workers : int
+            Number of dataloader workers passed to COMET `predict`.
+        """
         self.model_name_or_path = model_name_or_path
         self.batch_size = batch_size
         self.gpus = gpus
@@ -34,6 +47,13 @@ class CometScorer:
         self._lock = threading.Lock()
 
     def _load(self) -> None:
+        """Load the COMET checkpoint once in a thread-safe manner.
+
+        Returns
+        -------
+        None
+            Initializes `self._model` in place.
+        """   
         # Double-checked locking to prevent concurrent model loading
         if self._model is not None:
             return
@@ -53,6 +73,22 @@ class CometScorer:
             self._model = load_from_checkpoint(checkpoint_path)
 
     def score_reference(self, source: str, hypothesis: str, reference: str) -> float:
+        """Compute reference-based COMET score for one segment.
+
+        Parameters
+        ----------
+        source : str
+            Source-language input segment.
+        hypothesis : str
+            Model-produced translation.
+        reference : str
+            Human reference translation.
+
+        Returns
+        -------
+        float
+            COMET score for the single `(source, hypothesis, reference)` sample.
+        """        
         self._load()
         data = [{"src": source, "mt": hypothesis, "ref": reference}]
         output = self._model.predict(
@@ -64,6 +100,20 @@ class CometScorer:
         return float(output.scores[0])
 
     def score_reference_free(self, source: str, hypothesis: str) -> float:
+        """Compute reference-free COMET score for one segment.
+
+        Parameters
+        ----------
+        source : str
+            Source-language input segment.
+        hypothesis : str
+            Model-produced translation.
+
+        Returns
+        -------
+        float
+            Reference-free COMET score for the single `(source, hypothesis)` sample.
+        """
         self._load()
         data = [{"src": source, "mt": hypothesis}]
         output = self._model.predict(
@@ -84,6 +134,22 @@ class MetricsEngine:
         comet_gpus: int = DEFAULT_COMET_GPUS,
         comet_num_workers: int = DEFAULT_COMET_NUM_WORKERS,
     ) -> None:
+        """Initialize sentence-level translation metrics and COMET scorers.
+
+        Parameters
+        ----------
+        comet_model : str, optional
+            Model name/path for reference-based COMET, by default `DEFAULT_COMET_MODEL`.
+        cometkiwi_model : str, optional
+            Model name/path for reference-free COMET (KIWI), by default
+            `DEFAULT_COMET_KIWI_MODEL`.
+        comet_batch_size : int, optional
+            Batch size used by COMET prediction, by default `DEFAULT_COMET_BATCH_SIZE`.
+        comet_gpus : int, optional
+            GPU setting passed to COMET prediction, by default `DEFAULT_COMET_GPUS`.
+        comet_num_workers : int, optional
+            Worker count passed to COMET prediction, by default `DEFAULT_COMET_NUM_WORKERS`.
+        """
         self._bleu = BLEU(effective_order=True)
         self._chrf = CHRF()
         self._ter = TER()
@@ -107,6 +173,31 @@ class MetricsEngine:
         references: Sequence[str],
         metrics: Iterable[str],
     ) -> dict[str, float]:
+        """Compute requested metrics for a single translation result.
+
+        Parameters
+        ----------
+        source : str
+            Source-language input segment.
+        hypothesis : str
+            Model-produced translation.
+        references : Sequence[str]
+            Reference translations. Required for reference-based metrics.
+        metrics : Iterable[str]
+            Requested metric names.
+
+        Returns
+        -------
+        dict[str, float]
+            Mapping from metric name to score for the requested metrics.
+
+        Raises
+        ------
+        ValueError
+            If unknown metric names are requested.
+        ValueError
+            If any reference-based metric is requested but no valid references are provided.
+        """
         selected = [metric.lower() for metric in metrics]
         unknown = [metric for metric in selected if metric not in ALL_METRICS]
         if unknown:

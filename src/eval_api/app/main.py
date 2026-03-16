@@ -35,6 +35,13 @@ EVAL_WORKER_TIMEOUT_SECONDS = int(os.getenv("EVAL_WORKER_TIMEOUT_SECONDS", "3600
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Initialize and attach shared application state for FastAPI lifespan.
+
+    Parameters
+    ----------
+    app : FastAPI
+        FastAPI application instance whose state is initialized.
+    """
     registry = ModelRegistry()
     try:
         registry.load()
@@ -49,8 +56,23 @@ app = FastAPI(title="Offline Translation Eval API", version="0.1.0", lifespan=li
 metrics_engine = MetricsEngine()
 
 
-def _cpu_percent_per_core(start_cpu: object, end_cpu: object, wall: float) -> float:
-    """Estimate CPU usage over the full translation window (per logical core)."""
+def _cpu_percent_per_core(start_cpu: object, end_cpu: object, wall: float) -> float: 
+    """Estimate CPU usage over the translation window normalized per logical core.
+
+    Parameters
+    ----------
+    start_cpu : object
+        CPU times snapshot taken before translation.
+    end_cpu : object
+        CPU times snapshot taken after translation.
+    wall : float
+        Elapsed wall-clock time in seconds for the measured translation window.
+
+    Returns
+    -------
+    float
+        CPU utilization percentage per logical core.
+    """
     if wall <= 0:
         return 0.0
     cpu_delta = (end_cpu.user - start_cpu.user) + (end_cpu.system - start_cpu.system)
@@ -59,7 +81,18 @@ def _cpu_percent_per_core(start_cpu: object, end_cpu: object, wall: float) -> fl
 
 
 def _baseline_resource_usage(process: psutil.Process) -> float:
-    """Capture baseline RSS after models are loaded."""
+    """Capture baseline resident memory (RSS) for a process.
+
+    Parameters
+    ----------
+    process : psutil.Process
+        Process to sample.
+
+    Returns
+    -------
+    float
+        Baseline RSS in megabytes (MiB).
+    """
     baseline_rss_mb = process.memory_info().rss / (1024 ** 2)
     return baseline_rss_mb
 
@@ -69,11 +102,24 @@ def _translate_with_resources(
     tgt_lang: str,
     text: str,
 ) -> tuple[str, int, int, float | None, float | None, float | None, dict[str, float | int | None]]:
-    """
-    Translate and optionally profile resource usage.
+    """Translate text while collecting per-item resource and throughput metrics.
 
-    RAM is sampled at a fixed interval during translation to estimate mean and peak.
-    CPU usage is derived from CPU time deltas over the full translation duration.
+    Parameters
+    ----------
+    adapter : ModelAdapter
+        Loaded model adapter used to perform translation and token counting.
+    src_lang : str
+        Source language code.
+    tgt_lang : str
+        Target language code.
+    text : str
+        Input text to translate.
+
+    Returns
+    -------
+    tuple[str, int, int, float | None, float | None, float | None, dict[str, float | int | None]]
+        (translated_text, latency_ms, pure_inference_latency_ms, cpu_percent_per_core,
+        ram_mean_mb, ram_peak_mb, detailed_metrics).
     """
     process = psutil.Process(os.getpid())
 
@@ -139,8 +185,26 @@ def _translate_with_resources(
     return translated, latency_ms, pure_inference_latency_ms, cpu_percent, ram_mean, ram_peak, detailed_metrics
 
 
-def _isolated_translate_worker(payload: dict, queue: mp.Queue) -> None:
-    """Run translation + resource profiling in a clean subprocess (no COMET loaded)."""
+def _isolated_translate_worker(payload: dict, queue: mp.Queue) -> None:  
+    """"Run translation and profiling in a subprocess isolated from metric computation.
+
+    Parameters
+    ----------
+    payload : dict
+        Worker input payload containing:
+        - `config_path` (str): path to model config file used by the worker registry,
+        - `model_id` (str): model identifier to load,
+        - `src_lang` (str): source language code,
+        - `tgt_lang` (str): target language code,
+        - `items` (list[dict]): items with `source`, optional `reference`, optional `item_id`.
+    queue : mp.Queue
+        Multiprocessing queue used for worker-to-parent communication.
+
+    Returns
+    -------
+    None
+        The function communicates via `queue` and does not return a direct value.
+    """
     try:
         registry = ModelRegistry(payload["config_path"])
         registry.load()
@@ -208,8 +272,30 @@ def _isolated_translate_worker(payload: dict, queue: mp.Queue) -> None:
 def _run_isolated_translation(
     registry: ModelRegistry,
     request: EvaluateRequest,
-) -> tuple[list[EvaluateItemResult], float | None, list[int], list[int]]:
-    """Spawn a translation-only worker so resource stats aren't polluted by metrics."""
+) -> tuple[list[EvaluateItemResult], float | None, list[int], list[int]]:   
+    """Run batch translation in an isolated subprocess and collect profiling outputs.
+
+    Parameters
+    ----------
+    registry : ModelRegistry
+        Active registry used to resolve config path and model metadata.
+    request : EvaluateRequest
+        Evaluation request containing model id, language pair, and items.
+
+    Returns
+    -------
+    tuple[list[EvaluateItemResult], float | None, list[int], list[int]]
+        A tuple with:
+        - per-item translation results (without quality metrics),
+        - worker baseline RSS in MiB (or `None`),
+        - list of per-item `latency_ms`,
+        - list of per-item `pure_inference_latency_ms` values.
+
+    Raises
+    ------
+    HTTPException
+        If the worker times out, exits abnormally, or reports an internal error.
+    """
     ctx = mp.get_context("spawn")
     queue: mp.Queue = ctx.Queue()
     payload = {
@@ -295,6 +381,27 @@ app.add_middleware(
 
 @app.post("/translate", response_model=TranslateResponse)
 def translate(request: TranslateRequest) -> TranslateResponse:
+    """Translate a single input string using the selected model.
+
+    Parameters
+    ----------
+    request : TranslateRequest
+        Translation request payload.
+
+    Returns
+    -------
+    TranslateResponse
+        Response containing `model_id`, `translated_value`, and `latency_ms`.
+
+    Raises
+    ------
+    HTTPException
+        404 if `model_id` is unknown.
+    HTTPException
+        400 if the requested `(src_lang, tgt_lang)` pair is unsupported.
+    HTTPException
+        500 if translation fails at runtime.
+    """
     registry: ModelRegistry = app.state.registry
 
     try:
@@ -332,6 +439,31 @@ def translate(request: TranslateRequest) -> TranslateResponse:
 
 @app.post("/evaluate", response_model=EvaluateResponse)
 def evaluate(request: EvaluateRequest) -> EvaluateResponse:
+    """Translate and evaluate a batch of items with quality and resource metrics.
+
+    Parameters
+    ----------
+    request : EvaluateRequest
+        Evaluation request containing model id, language pair, items, and optional metric list.
+
+    Returns
+    -------
+    EvaluateResponse
+        Per-item results plus aggregate statistics, average latencies, and baseline RSS.
+
+    Raises
+    ------
+    HTTPException
+        404 if `model_id` is unknown.
+    HTTPException
+        400 if the requested language pair is unsupported.
+    HTTPException
+        400 if `items` is empty.
+    HTTPException
+        400 if reference-based metrics are requested without references.
+    HTTPException
+        400 if isolated translation fails.
+    """
     registry: ModelRegistry = app.state.registry
 
     # Eval uses isolated worker processes, so clear any translate-side cache first.
@@ -462,7 +594,14 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
 
 @app.get("/models", response_model=ModelsListResponse)
 def list_models() -> ModelsListResponse:
-    """List all available translation models and their supported language pairs."""
+    """List configured models with adapter type and supported language pairs.
+
+    Returns
+    -------
+    ModelsListResponse
+        Collection of available models exposed by the active model registry.
+    """
+    
     registry: ModelRegistry = app.state.registry
 
     models_info = []
@@ -481,7 +620,20 @@ def list_models() -> ModelsListResponse:
 
 @app.get("/health")
 def health_check() -> dict:
-    """Health check endpoint to verify backend is ready."""
+    """Report backend readiness and loaded model count.
+
+    Returns
+    -------
+    dict
+        Readiness payload with:
+        - `status`: `"ready"` when registry is accessible,
+        - `models_loaded`: number of configured models.
+
+    Raises
+    ------
+    HTTPException
+        503 if readiness checks fail (service not ready).
+    """
     try:
         registry: ModelRegistry = app.state.registry
         models_loaded = len(registry.list_models())

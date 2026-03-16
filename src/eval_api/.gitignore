@@ -29,3 +29,6 @@ dist/
 finetune_bundle.zip
 models/
 results/
+
+# Sphinx docs
+_build/
