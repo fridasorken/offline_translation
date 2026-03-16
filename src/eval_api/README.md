@@ -99,14 +99,6 @@ Then build the Docker image and start the container using Docker Compose in deta
 docker compose up -d
 ```
 
-If you want to use gated Hugging Face models such as `Unbabel/wmt22-cometkiwi-da`,
-set a local Hugging Face read token before starting Docker:
-
-```bash
-export HF_TOKEN=hf_your_read_token
-docker compose up -d
-```
-
 ## Example request
 
 ```json
@@ -247,13 +239,6 @@ export COMET_GPUS=0
 export COMET_NUM_WORKERS=1
 ```
 
-`Unbabel/wmt22-cometkiwi-da` is a gated Hugging Face model. To use `cometkiwi`:
-- request/accept access on the Hugging Face model page
-- create a Hugging Face user access token with `Read` scope
-- expose it to the backend as `HF_TOKEN`
-
-Without that token, `cometkiwi` requests will fail with a Hugging Face `401` / gated repo error.
-
 ## Resource profiling
 
 Resource profiling is always on for `/evaluate`, but you can tune it via env vars:
@@ -289,6 +274,23 @@ and allow remote files for that entry:
 
 The first run will download to the Hugging Face cache. After that, you can switch
 `local_files_only` back to `true` to enforce offline loading.
+
+## Documentation generation
+
+This project is configured to use Sphinx docs generation.
+To generate HTML docs files, run the following command from the `eval_api/docs/` directory:
+
+### Linux/MacOS
+```bash
+make html
+```
+
+### Windows
+```bash
+./make.bat html
+```
+
+You can then view the docs by opening the generated `index.html` file from `docs/_build/html/` in a browser.
 
 ## Repo description
 

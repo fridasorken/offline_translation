@@ -9,7 +9,6 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - LAZY_LOAD_MODELS=false
-      - HF_TOKEN=${HF_TOKEN}
       # Resource profiling settings
       - EVAL_MEM_INTERVAL=0.1
       - EVAL_MEM_BACKEND=psutil
