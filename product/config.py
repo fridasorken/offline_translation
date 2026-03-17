@@ -11,7 +11,7 @@ else:
     BASE_DIR = _THIS_DIR
 DEFAULT_MODEL_CACHE_DIR = BASE_DIR / "models" / "product_ct2"
 
-SOURCE_LANG = "en"
+SOURCE_LANG = os.getenv("PRODUCT_SOURCE_LANG", "en")
 TARGET_LANG = os.getenv("PRODUCT_TARGET_LANG", "nob")
 MODEL_QUANTIZATION = os.getenv("PRODUCT_MODEL_QUANTIZATION", "int8")
 DEVICE = "cpu"
@@ -58,6 +58,8 @@ class ProductModelConfig:
         Directory root where converted CTranslate2 models are cached.
     local_files_only : bool
         If True, forbid remote Hugging Face downloads during startup.
+    use_target_tag : bool
+        If True, prepend the Marian-style `>>lang<<` target tag before translation.
     """
 
     source_lang: str
@@ -72,22 +74,72 @@ class ProductModelConfig:
     inter_threads: int
     ct2_cache_dir: Path
     local_files_only: bool
+    use_target_tag: bool
 
 
-OPUS_MODELS: dict[str, dict[str, str]] = {
-    "nob": {
+LANGUAGE_ALIASES = {
+    "no": "nob",
+    "nor": "nob",
+    "deu": "de",
+    "ger": "de",
+    "por": "pt",
+}
+
+
+OPUS_MODELS: dict[tuple[str, str], dict[str, str | bool]] = {
+    ("en", "nob"): {
         "model_id": "opus-mt-tc-big-en-nob-military",
         "model_path": "MariusBerg/opus-tc-big-en-nob-military",
+        "use_target_tag": True,
     },
-    "de": {
+    ("en", "de"): {
         "model_id": "opus-mt-tc-big-en-de-military-v1",
         "model_path": "MariusBerg/opus-tc-big-en-de-military-v1",
+        "use_target_tag": True,
     },
-    "pt": {
+    ("en", "pt"): {
         "model_id": "opus-mt-tc-big-en-pt-military",
         "model_path": "MariusBerg/opus-tc-big-en-pt-military",
+        "use_target_tag": True,
+    },
+    ("nob", "en"): {
+        "model_id": "opus-mt-tc-big-gmq-en",
+        "model_path": "Helsinki-NLP/opus-mt-tc-big-gmq-en",
+        "use_target_tag": False,
+    },
+    ("nno", "en"): {
+        "model_id": "opus-mt-tc-big-gmq-en",
+        "model_path": "Helsinki-NLP/opus-mt-tc-big-gmq-en",
+        "use_target_tag": False,
+    },
+    ("de", "en"): {
+        "model_id": "opus-mt-de-en",
+        "model_path": "Helsinki-NLP/opus-mt-de-en",
+        "use_target_tag": False,
+    },
+    ("pt", "en"): {
+        "model_id": "opus-mt-ROMANCE-en",
+        "model_path": "Helsinki-NLP/opus-mt-ROMANCE-en",
+        "use_target_tag": False,
     },
 }
+
+
+def _normalize_lang(code: str) -> str:
+    """Normalize language aliases used in product startup configuration.
+
+    Parameters
+    ----------
+    code : str
+        Raw configured language code.
+
+    Returns
+    -------
+    str
+        Normalized product language code.
+    """
+    normalized = code.strip().lower()
+    return LANGUAGE_ALIASES.get(normalized, normalized)
 
 
 def load_product_config() -> ProductModelConfig:
@@ -105,22 +157,22 @@ def load_product_config() -> ProductModelConfig:
     ValueError
         If the configured target language is not one of the product's known Opus models.
     """
-    target_lang = TARGET_LANG.strip().lower()
-    source_lang = SOURCE_LANG.strip().lower()
-    if source_lang != "en":
-        raise ValueError("This product prototype currently supports only English source text.")
-    if target_lang not in OPUS_MODELS:
-        supported_targets = ", ".join(sorted(OPUS_MODELS))
+    source_lang = _normalize_lang(SOURCE_LANG)
+    target_lang = _normalize_lang(TARGET_LANG)
+    pair = (source_lang, target_lang)
+    if pair not in OPUS_MODELS:
+        supported_pairs = ", ".join(f"{src}->{tgt}" for src, tgt in sorted(OPUS_MODELS))
         raise ValueError(
-            f"Unsupported target language '{target_lang}'. Expected one of: {supported_targets}"
+            f"Unsupported language pair '{source_lang}->{target_lang}'. "
+            f"Expected one of: {supported_pairs}"
         )
 
-    model_info = OPUS_MODELS[target_lang]
+    model_info = OPUS_MODELS[pair]
     return ProductModelConfig(
         source_lang=source_lang,
         target_lang=target_lang,
-        model_id=model_info["model_id"],
-        model_path=model_info["model_path"],
+        model_id=str(model_info["model_id"]),
+        model_path=str(model_info["model_path"]),
         quantization=MODEL_QUANTIZATION,
         device=DEVICE,
         num_beams=NUM_BEAMS,
@@ -129,4 +181,5 @@ def load_product_config() -> ProductModelConfig:
         inter_threads=INTER_THREADS,
         ct2_cache_dir=MODEL_CACHE_DIR,
         local_files_only=LOCAL_FILES_ONLY,
+        use_target_tag=bool(model_info["use_target_tag"]),
     )

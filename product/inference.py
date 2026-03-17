@@ -124,20 +124,23 @@ class OpusTranslator:
         self.translate("System warmup.")
 
     def translate(self, text: str) -> str:
-        """Translate one English input string to the configured target language.
+        """Translate one input string using the configured product language pair.
 
         Parameters
         ----------
         text : str
-            English input text.
+            Input text in the configured source language.
 
         Returns
         -------
         str
-            Translated output text from the configured fine-tuned Opus model.
+            Translated output text from the configured Opus model.
         """
-        tagged_text = f">>{self.config.target_lang}<< {text}"
-        source_token_ids = self.tokenizer.encode(tagged_text)
+        if self.config.use_target_tag:
+            prepared_text = f">>{self.config.target_lang}<< {text}"
+        else:
+            prepared_text = text
+        source_token_ids = self.tokenizer.encode(prepared_text)
         source_tokens = self.tokenizer.convert_ids_to_tokens(source_token_ids)
         results = self.translator.translate_batch(
             [source_tokens],
