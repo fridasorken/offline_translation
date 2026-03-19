@@ -30,6 +30,8 @@ finetune/model/
 finetune/outputs/
 finetune/results/
 
+models/
+
 # OS junk
 .DS_Store
 
