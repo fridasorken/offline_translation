@@ -9,7 +9,7 @@ if _THIS_DIR.name == "product":
     BASE_DIR = _THIS_DIR.parent
 else:
     BASE_DIR = _THIS_DIR
-DEFAULT_MODEL_CACHE_DIR = BASE_DIR / "models" / "product_ct2"
+DEFAULT_MODEL_CACHE_DIR = BASE_DIR / "assets" / "models" / "product_ct2"
 
 SOURCE_LANG = os.getenv("PRODUCT_SOURCE_LANG", "en")
 TARGET_LANG = os.getenv("PRODUCT_TARGET_LANG", "nob")
@@ -142,7 +142,7 @@ def _normalize_lang(code: str) -> str:
     return LANGUAGE_ALIASES.get(normalized, normalized)
 
 
-def load_product_config() -> ProductModelConfig:
+def load_product_config(source_lang: str, target_lang: str) -> ProductModelConfig:
     """Load and validate product runtime configuration from environment.
 
     Returns
@@ -157,8 +157,8 @@ def load_product_config() -> ProductModelConfig:
     ValueError
         If the configured target language is not one of the product's known Opus models.
     """
-    source_lang = _normalize_lang(SOURCE_LANG)
-    target_lang = _normalize_lang(TARGET_LANG)
+    source_lang = _normalize_lang(source_lang)
+    target_lang = _normalize_lang(target_lang)
     pair = (source_lang, target_lang)
     if pair not in OPUS_MODELS:
         supported_pairs = ", ".join(f"{src}->{tgt}" for src, tgt in sorted(OPUS_MODELS))
