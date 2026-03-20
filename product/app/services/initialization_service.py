@@ -4,8 +4,8 @@ from app.inference import OpusTranslator
 
 class TranslationRuntime:
     def __init__(self, language: str) -> None:
-        self.sender = OpusTranslator(load_product_config(source_lang=language, target_lang='en'))
-        self.receiver = OpusTranslator(load_product_config(source_lang='en', target_lang=language))
+        self.sender = OpusTranslator(load_product_config(source_lang=language, target_lang="en"))
+        self.receiver = OpusTranslator(load_product_config(source_lang="en", target_lang=language))
 
         self.sender.warmup()
         self.receiver.warmup()
@@ -15,9 +15,10 @@ class TranslationRuntime:
             return self.sender
         return self.receiver
 
+
 def load_translator(language: str) -> TranslationRuntime:
     lang = language.strip().lower()
     if not lang:
         raise ValueError("language must be non-empty")
-    
+
     return TranslationRuntime(language=lang)

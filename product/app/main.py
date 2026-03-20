@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import logging
 import time
+import pandas as pd
 
-# from config import PRELOAD_ON_STARTUP, RUN_MODE, SINGLE_TEXT
-# from inference import OpusTranslator
-# from app.config import load_product_config
-# from app.schemas import InitializeRequest, TranslateRequest, TranslateResponse
-# from app.services.initialization_service import load_translator
+from app.config import ACRONYMS_DIR
+from app.services.acronym_service import parse_acronyms
 
 from fastapi import FastAPI, HTTPException
 
@@ -31,6 +29,9 @@ def initialize(payload: InitializeRequest) -> dict[str, str]:
     try:
         app.state.translator = load_translator(language)
         app.state.input_language = language
+        df = pd.read_excel(ACRONYMS_DIR, sheet_name=language)
+        app.state.acronyms = dict(zip(df["acronym"], df["expansion"]))
+
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -52,8 +53,7 @@ def translate(payload: TranslateRequest) -> TranslateResponse:
         raise HTTPException(status_code=400, detail="text must be non-empty")
 
     if payload.sender:
-        # check acronyms
-        print("hei")
+        text = parse_acronyms(text, app.state.acronyms)
 
     if app.state.input_language == "en":
         return TranslateResponse(translation=text)
@@ -63,9 +63,13 @@ def translate(payload: TranslateRequest) -> TranslateResponse:
         translated_text = translate_message(app.state.translator, payload.sender, text)
         latency_ms = int((time.perf_counter() - start) * 1000)
     except (RuntimeError, OSError) as exc:
-        raise HTTPException(status_code=503, detail=f"Translation backend unavailable: {exc}") from exc
+        raise HTTPException(
+            status_code=503, detail=f"Translation backend unavailable: {exc}"
+        ) from exc
     except Exception as exc:
-        logger.exception("translate failed sender=%s input_lang=%s", payload.sender, app.state.input_language)
+        logger.exception(
+            "translate failed sender=%s input_lang=%s", payload.sender, app.state.input_language
+        )
         raise HTTPException(status_code=500, detail="Translation failed") from exc
 
     logger.info(

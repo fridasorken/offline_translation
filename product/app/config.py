@@ -11,6 +11,8 @@ else:
     BASE_DIR = _THIS_DIR
 DEFAULT_MODEL_CACHE_DIR = BASE_DIR / "assets" / "models" / "product_ct2"
 
+ACRONYMS_DIR = BASE_DIR / "assets" / "acronyms.xlsx"
+
 SOURCE_LANG = os.getenv("PRODUCT_SOURCE_LANG", "en")
 TARGET_LANG = os.getenv("PRODUCT_TARGET_LANG", "nob")
 MODEL_QUANTIZATION = os.getenv("PRODUCT_MODEL_QUANTIZATION", "int8")
