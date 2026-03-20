@@ -27,8 +27,10 @@ def initialize(payload: InitializeRequest) -> dict[str, str]:
         raise HTTPException(status_code=400, detail="language must be non-empty")
 
     try:
-        app.state.translator = load_translator(language)
+        if language != 'en':
+            app.state.translator = load_translator(language)
         app.state.input_language = language
+        
         df = pd.read_excel(ACRONYMS_DIR, sheet_name=language)
         app.state.acronyms = dict(zip(df["acronym"], df["expansion"]))
 
@@ -45,7 +47,7 @@ def initialize(payload: InitializeRequest) -> dict[str, str]:
 
 @app.post("/translate", response_model=TranslateResponse)
 def translate(payload: TranslateRequest) -> TranslateResponse:
-    if not hasattr(app.state, "translator") or not hasattr(app.state, "input_language"):
+    if not hasattr(app.state, "input_language"):
         raise HTTPException(status_code=409, detail="Call /initialize first")
 
     text = payload.text.strip()
