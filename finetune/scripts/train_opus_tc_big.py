@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import inspect
 import json
 import shutil
@@ -19,7 +20,16 @@ from transformers import (
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-CONFIG_PATH = BASE_DIR / "config" / "finetune_config.json"
+DEFAULT_CONFIG_PATH = BASE_DIR / "config" / "finetune_config.json"
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Fine-tune an Opus MT model")
+    parser.add_argument(
+        "--config", type=Path, default=DEFAULT_CONFIG_PATH,
+        help="Path to finetune config JSON (default: finetune/config/finetune_config.json)",
+    )
+    return parser.parse_args()
 
 
 def _resolve_path(path_value: str) -> Path:
@@ -29,8 +39,8 @@ def _resolve_path(path_value: str) -> Path:
     return (BASE_DIR / candidate).resolve()
 
 
-def _load_config() -> tuple[dict, dict, dict]:
-    raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+def _load_config(config_path: Path) -> tuple[dict, dict, dict]:
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
     return raw["paths"], raw["dataset"], raw["training"]
 
 
@@ -66,7 +76,9 @@ def _find_last_checkpoint(output_dir: Path) -> str | None:
 
 
 def main() -> None:
-    path_cfg, dataset_cfg, training_cfg = _load_config()
+    args = _parse_args()
+    config_path = args.config
+    path_cfg, dataset_cfg, training_cfg = _load_config(config_path)
 
     train_jsonl = _resolve_path(path_cfg["hf_train_jsonl"])
     eval_jsonl = _resolve_path(path_cfg["hf_eval_jsonl"])
@@ -256,7 +268,7 @@ def main() -> None:
         best_checkpoint = str(output_dir)
 
     metrics_payload = {
-        "config_path": str(CONFIG_PATH),
+        "config_path": str(config_path),
         "model_ref": model_ref,
         "source_lang": source_lang,
         "target_lang": target_lang,
@@ -275,7 +287,7 @@ def main() -> None:
     metrics_path.parent.mkdir(parents=True, exist_ok=True)
     metrics_path.write_text(json.dumps(metrics_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"config_path={CONFIG_PATH}")
+    print(f"config_path={config_path}")
     print(f"model_ref={model_ref}")
     print(f"train_rows={len(tokenized['train'])}")
     print(f"eval_rows={len(tokenized['eval']) if has_eval_dataset else 0}")

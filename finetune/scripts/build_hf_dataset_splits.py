@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import random
 from collections import defaultdict
@@ -7,7 +8,16 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-CONFIG_PATH = BASE_DIR / "config" / "finetune_config.json"
+DEFAULT_CONFIG_PATH = BASE_DIR / "config" / "finetune_config.json"
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Build train/eval/test splits from a JSONL dataset")
+    parser.add_argument(
+        "--config", type=Path, default=DEFAULT_CONFIG_PATH,
+        help="Path to finetune config JSON (default: finetune/config/finetune_config.json)",
+    )
+    return parser.parse_args()
 
 
 def _resolve_path(path_value: str) -> Path:
@@ -17,8 +27,8 @@ def _resolve_path(path_value: str) -> Path:
     return (BASE_DIR / candidate).resolve()
 
 
-def _load_config() -> tuple[dict, dict, dict]:
-    raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+def _load_config(config_path: Path) -> tuple[dict, dict, dict]:
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
     return raw["paths"], raw["dataset"], raw["training"]
 
 
@@ -41,7 +51,9 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 
 
 def main() -> None:
-    path_cfg, dataset_cfg, training_cfg = _load_config()
+    args = _parse_args()
+    config_path = args.config
+    path_cfg, dataset_cfg, training_cfg = _load_config(config_path)
     train_ready_path = _resolve_path(path_cfg["train_ready_jsonl"])
     train_path = _resolve_path(path_cfg["hf_train_jsonl"])
     eval_path = _resolve_path(path_cfg["hf_eval_jsonl"])
@@ -110,7 +122,7 @@ def main() -> None:
     _write_jsonl(test_path, test_rows_out)
 
     report = {
-        "config_path": str(CONFIG_PATH),
+        "config_path": str(config_path),
         "input_train_ready_path": str(train_ready_path),
         "train_path": str(train_path),
         "eval_path": str(eval_path),
@@ -128,7 +140,7 @@ def main() -> None:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"config_path={CONFIG_PATH}")
+    print(f"config_path={config_path}")
     print(f"train_ready_path={train_ready_path}")
     print(f"train_rows={len(train_rows)}")
     print(f"eval_rows={len(eval_rows_out)}")
