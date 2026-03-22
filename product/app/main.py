@@ -2,17 +2,15 @@ from __future__ import annotations
 
 import logging
 import time
+
 import pandas as pd
-
-from app.config import ACRONYMS_DIR
-from app.services.acronym_service import parse_acronyms
-
 from fastapi import FastAPI, HTTPException
 
+from app.config import ACRONYMS_PATH
 from app.schemas import InitializeRequest, TranslateRequest, TranslateResponse
-from app.services.initialization_service import load_translator
+from app.services.acronym_service import build_acronym_map, parse_acronyms
 from app.services.inference_service import translate_message
-
+from app.services.initialization_service import load_translator
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger("product")
@@ -22,17 +20,20 @@ app = FastAPI(title="Offline Translation", version="0.1.0")
 
 @app.post("/initialize")
 def initialize(payload: InitializeRequest) -> dict[str, str]:
-    language = payload.language.strip().lower()
-    if not language:
-        raise HTTPException(status_code=400, detail="language must be non-empty")
+    language = payload.language.lower()
 
     try:
-        if language != 'en':
+        if language != "en":
             app.state.translator = load_translator(language)
         app.state.input_language = language
-        
-        df = pd.read_excel(ACRONYMS_DIR, sheet_name=language)
-        app.state.acronyms = dict(zip(df["acronym"], df["expansion"]))
+
+        try:
+            df = pd.read_excel(ACRONYMS_PATH, sheet_name=language)
+        except ValueError:
+            raise ValueError(
+                f"No acronym sheet found for language '{language}' in {ACRONYMS_PATH.name}"
+            )
+        app.state.acronyms = build_acronym_map(dict(zip(df["acronym"], df["expansion"])))
 
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -51,8 +52,6 @@ def translate(payload: TranslateRequest) -> TranslateResponse:
         raise HTTPException(status_code=409, detail="Call /initialize first")
 
     text = payload.text.strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="text must be non-empty")
 
     if payload.sender:
         text = parse_acronyms(text, app.state.acronyms)
