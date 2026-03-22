@@ -1,5 +1,4 @@
-from pydantic import BaseModel, Field, constr
-from typing import Optional
+from pydantic import BaseModel, constr
 
 NonEmptyStr = constr(strip_whitespace=True, min_length=1)
 

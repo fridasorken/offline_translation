@@ -17,8 +17,4 @@ class TranslationRuntime:
 
 
 def load_translator(language: str) -> TranslationRuntime:
-    lang = language.strip().lower()
-    if not lang:
-        raise ValueError("language must be non-empty")
-
-    return TranslationRuntime(language=lang)
+    return TranslationRuntime(language=language)
