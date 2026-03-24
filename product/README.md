@@ -13,7 +13,7 @@ Minimal Opus-only product prototype.
 
 The gateway will only route to running translation services. Requests to language pairs that aren't available will fail at the gateway.
 
-To load English-Norwegian and translate:
+To start the gateway, load English <-> Norwegian pairs and translate:
 
 ```bash
 docker compose up -d translate-en-nob translate-nob-en gateway
