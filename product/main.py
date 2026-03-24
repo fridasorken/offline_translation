@@ -52,6 +52,15 @@ def interactive_loop(translator: OpusTranslator) -> None:
 
 def main() -> None:
     """Start the product CLI, preload the selected model, and dispatch run mode."""
+    if RUN_MODE == "api":
+        import uvicorn
+
+        from api import app
+        from config import API_HOST, API_PORT
+
+        uvicorn.run(app, host=API_HOST, port=API_PORT, log_level="info")
+        return
+
     config = load_product_config()
     logger.info(
         "Starting product translator with model=%s source=%s target=%s quantization=%s",

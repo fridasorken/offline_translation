@@ -9,6 +9,15 @@ Minimal Opus-only product prototype.
 - otherwise downloads from Hugging Face and converts once
 - runs an interactive stdin loop for translation
 
+## REST API (Compose)
+
+```bash
+docker compose up -d
+curl -X POST http://localhost:8080/translate/en/nob \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Hello world"}'
+```
+
 ## Supported language pairs
 
 - `en -> nob` (fine-tuned)

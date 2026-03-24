@@ -1,0 +1,176 @@
+services:
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: product-gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      translate-en-nob:
+        condition: service_healthy
+      translate-en-de:
+        condition: service_healthy
+      translate-en-pt:
+        condition: service_healthy
+      translate-nob-en:
+        condition: service_healthy
+      translate-de-en:
+        condition: service_healthy
+      translate-pt-en:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+  translate-en-nob:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: product-en-nob
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PRODUCT_SOURCE_LANG=en
+      - PRODUCT_TARGET_LANG=nob
+      - PRODUCT_MODEL_QUANTIZATION=int8
+      - PRODUCT_RUN_MODE=api
+      - PRODUCT_API_PORT=8080
+    volumes:
+      - product-models:/models
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 180s
+      retries: 3
+    restart: unless-stopped
+
+  translate-en-de:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: product-en-de
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PRODUCT_SOURCE_LANG=en
+      - PRODUCT_TARGET_LANG=de
+      - PRODUCT_MODEL_QUANTIZATION=int8
+      - PRODUCT_RUN_MODE=api
+      - PRODUCT_API_PORT=8080
+    volumes:
+      - product-models:/models
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 180s
+      retries: 3
+    restart: unless-stopped
+
+  translate-en-pt:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: product-en-pt
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PRODUCT_SOURCE_LANG=en
+      - PRODUCT_TARGET_LANG=pt
+      - PRODUCT_MODEL_QUANTIZATION=int8
+      - PRODUCT_RUN_MODE=api
+      - PRODUCT_API_PORT=8080
+    volumes:
+      - product-models:/models
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 180s
+      retries: 3
+    restart: unless-stopped
+
+  translate-nob-en:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: product-nob-en
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PRODUCT_SOURCE_LANG=nob
+      - PRODUCT_TARGET_LANG=en
+      - PRODUCT_MODEL_QUANTIZATION=int8
+      - PRODUCT_RUN_MODE=api
+      - PRODUCT_API_PORT=8080
+    volumes:
+      - product-models:/models
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 180s
+      retries: 3
+    restart: unless-stopped
+
+  translate-de-en:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: product-de-en
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PRODUCT_SOURCE_LANG=de
+      - PRODUCT_TARGET_LANG=en
+      - PRODUCT_MODEL_QUANTIZATION=int8
+      - PRODUCT_RUN_MODE=api
+      - PRODUCT_API_PORT=8080
+    volumes:
+      - product-models:/models
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 180s
+      retries: 3
+    restart: unless-stopped
+
+  translate-pt-en:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: product-pt-en
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PRODUCT_SOURCE_LANG=pt
+      - PRODUCT_TARGET_LANG=en
+      - PRODUCT_MODEL_QUANTIZATION=int8
+      - PRODUCT_RUN_MODE=api
+      - PRODUCT_API_PORT=8080
+    volumes:
+      - product-models:/models
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 180s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  product-models:
+    driver: local

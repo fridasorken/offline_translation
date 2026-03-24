@@ -26,6 +26,8 @@ LOCAL_FILES_ONLY = False
 PRELOAD_ON_STARTUP = True
 RUN_MODE = os.getenv("PRODUCT_RUN_MODE", "interactive")
 SINGLE_TEXT = os.getenv("PRODUCT_SINGLE_TEXT", "We need backup now.")
+API_HOST = os.getenv("PRODUCT_API_HOST", "0.0.0.0")
+API_PORT = int(os.getenv("PRODUCT_API_PORT", "8080"))
 
 
 @dataclass(frozen=True)
