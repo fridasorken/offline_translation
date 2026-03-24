@@ -11,8 +11,12 @@ Minimal Opus-only product prototype.
 
 ## REST API (Compose)
 
+The gateway will only route to running translation services. Requests to language pairs that aren't available will fail at the gateway.
+
+To load English-Norwegian and translate:
+
 ```bash
-docker compose up -d
+docker compose up -d translate-en-nob translate-nob-en gateway
 curl -X POST http://localhost:8080/translate/en/nob \
   -H "Content-Type: application/json" \
   -d '{"text": "Hello world"}'
