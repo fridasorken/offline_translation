@@ -39,8 +39,6 @@ services:
       - PRODUCT_MODEL_QUANTIZATION=int8
       - PRODUCT_RUN_MODE=api
       - PRODUCT_API_PORT=8080
-    volumes:
-      - product-models:/models
     expose:
       - "8080"
     healthcheck:
@@ -63,8 +61,6 @@ services:
       - PRODUCT_MODEL_QUANTIZATION=int8
       - PRODUCT_RUN_MODE=api
       - PRODUCT_API_PORT=8080
-    volumes:
-      - product-models:/models
     expose:
       - "8080"
     healthcheck:
@@ -87,8 +83,6 @@ services:
       - PRODUCT_MODEL_QUANTIZATION=int8
       - PRODUCT_RUN_MODE=api
       - PRODUCT_API_PORT=8080
-    volumes:
-      - product-models:/models
     expose:
       - "8080"
     healthcheck:
@@ -111,8 +105,6 @@ services:
       - PRODUCT_MODEL_QUANTIZATION=int8
       - PRODUCT_RUN_MODE=api
       - PRODUCT_API_PORT=8080
-    volumes:
-      - product-models:/models
     expose:
       - "8080"
     healthcheck:
@@ -135,8 +127,6 @@ services:
       - PRODUCT_MODEL_QUANTIZATION=int8
       - PRODUCT_RUN_MODE=api
       - PRODUCT_API_PORT=8080
-    volumes:
-      - product-models:/models
     expose:
       - "8080"
     healthcheck:
@@ -159,8 +149,6 @@ services:
       - PRODUCT_MODEL_QUANTIZATION=int8
       - PRODUCT_RUN_MODE=api
       - PRODUCT_API_PORT=8080
-    volumes:
-      - product-models:/models
     expose:
       - "8080"
     healthcheck:
@@ -170,7 +158,3 @@ services:
       start_period: 180s
       retries: 3
     restart: unless-stopped
-
-volumes:
-  product-models:
-    driver: local

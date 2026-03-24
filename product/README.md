@@ -5,8 +5,8 @@ Minimal Opus-only product prototype.
 ## What it does
 
 - loads one Opus model at startup based on `PRODUCT_SOURCE_LANG` + `PRODUCT_TARGET_LANG`
-- reuses cached CT2 model if present
-- otherwise downloads from Hugging Face and converts once
+- ships with all supported model artifacts preloaded at image build time
+- loads the baked-in CT2 cache and Hugging Face files at runtime without re-downloading
 - runs an interactive stdin loop for translation
 
 ## REST API (Compose)
@@ -38,6 +38,9 @@ curl -X POST http://localhost:8080/translate/en/nob \
 docker build -t translation-product-cli ./product
 ```
 
+The build now downloads every supported product model and converts each one to CT2.
+That makes the resulting image self-contained for runtime use.
+
 ## Run interactively
 
 ```bash
@@ -45,7 +48,6 @@ docker run --rm -it \
   -e PRODUCT_SOURCE_LANG=en \
   -e PRODUCT_TARGET_LANG=nob \
   -e PRODUCT_MODEL_QUANTIZATION=int8 \
-  -v translation_product_cache:/models \
   translation-product-cli
 ```
 
@@ -58,7 +60,6 @@ docker run --rm -it \
   -e PRODUCT_SOURCE_LANG=en \
   -e PRODUCT_TARGET_LANG=de \
   -e PRODUCT_MODEL_QUANTIZATION=int8 \
-  -v translation_product_cache:/models \
   translation-product-cli
 ```
 
@@ -69,14 +70,13 @@ docker run --rm -it \
   -e PRODUCT_SOURCE_LANG=de \
   -e PRODUCT_TARGET_LANG=en \
   -e PRODUCT_MODEL_QUANTIZATION=int8 \
-  -v translation_product_cache:/models \
   translation-product-cli
 ```
 
 ## Notes
 
-- first startup can take a while because the model may need to be downloaded and converted
-- later runs reuse the mounted `/models` cache volume
+- image build takes longer because every supported model is downloaded and converted up front
+- runtime startup no longer depends on downloading model artifacts from Hugging Face
 - `pt -> en` currently uses `Helsinki-NLP/opus-mt-ROMANCE-en` because a dedicated `pt -> en`
   or `tc-big-pt -> en` Opus checkpoint was not available
 - use `Ctrl+D` or type `exit` to quit

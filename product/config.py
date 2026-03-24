@@ -9,7 +9,17 @@ if _THIS_DIR.name == "product":
     BASE_DIR = _THIS_DIR.parent
 else:
     BASE_DIR = _THIS_DIR
-DEFAULT_MODEL_CACHE_DIR = BASE_DIR / "models" / "product_ct2"
+DEFAULT_MODEL_ROOT = BASE_DIR / "models" / "product"
+DEFAULT_MODEL_CACHE_DIR = DEFAULT_MODEL_ROOT / "ct2"
+
+
+def _read_bool_env(name: str, default: bool) -> bool:
+    """Parse a boolean environment variable with a safe default."""
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
 
 SOURCE_LANG = os.getenv("PRODUCT_SOURCE_LANG", "en")
 TARGET_LANG = os.getenv("PRODUCT_TARGET_LANG", "nob")
@@ -22,7 +32,7 @@ INTER_THREADS = 1
 MODEL_CACHE_DIR = Path(
     os.getenv("PRODUCT_MODEL_CACHE_DIR", str(DEFAULT_MODEL_CACHE_DIR))
 ).expanduser()
-LOCAL_FILES_ONLY = False
+LOCAL_FILES_ONLY = _read_bool_env("PRODUCT_LOCAL_FILES_ONLY", False)
 PRELOAD_ON_STARTUP = True
 RUN_MODE = os.getenv("PRODUCT_RUN_MODE", "interactive")
 SINGLE_TEXT = os.getenv("PRODUCT_SINGLE_TEXT", "We need backup now.")
@@ -185,3 +195,28 @@ def load_product_config() -> ProductModelConfig:
         local_files_only=LOCAL_FILES_ONLY,
         use_target_tag=bool(model_info["use_target_tag"]),
     )
+
+
+def list_product_configs() -> list[ProductModelConfig]:
+    """Return resolved configs for every supported product language pair."""
+    configs: list[ProductModelConfig] = []
+    for source_lang, target_lang in sorted(OPUS_MODELS):
+        model_info = OPUS_MODELS[(source_lang, target_lang)]
+        configs.append(
+            ProductModelConfig(
+                source_lang=source_lang,
+                target_lang=target_lang,
+                model_id=str(model_info["model_id"]),
+                model_path=str(model_info["model_path"]),
+                quantization=MODEL_QUANTIZATION,
+                device=DEVICE,
+                num_beams=NUM_BEAMS,
+                max_new_tokens=MAX_NEW_TOKENS,
+                num_threads=NUM_THREADS,
+                inter_threads=INTER_THREADS,
+                ct2_cache_dir=MODEL_CACHE_DIR,
+                local_files_only=LOCAL_FILES_ONLY,
+                use_target_tag=bool(model_info["use_target_tag"]),
+            )
+        )
+    return configs
