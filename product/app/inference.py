@@ -7,7 +7,7 @@ from pathlib import Path
 import ctranslate2
 from transformers import AutoTokenizer
 
-from config import ProductModelConfig
+from app.config import ProductModelConfig
 
 logger = logging.getLogger(__name__)
 

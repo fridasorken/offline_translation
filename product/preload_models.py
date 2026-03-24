@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import logging
 
-from config import list_product_configs
-from inference import OpusTranslator
+from app.config import OPUS_MODELS, load_product_config
+from app.inference import OpusTranslator
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger("product-preload")
 
 
 def main() -> None:
-    """Download and convert every supported product model ahead of runtime."""
+    """Download and convert all configured product models during image build."""
     seen_model_paths: set[str] = set()
 
-    for config in list_product_configs():
+    for source_lang, target_lang in sorted(OPUS_MODELS):
+        config = load_product_config(source_lang=source_lang, target_lang=target_lang)
         if config.model_path in seen_model_paths:
             continue
 

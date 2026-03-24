@@ -9,8 +9,9 @@ if _THIS_DIR.name == "product":
     BASE_DIR = _THIS_DIR.parent
 else:
     BASE_DIR = _THIS_DIR
-DEFAULT_MODEL_ROOT = BASE_DIR / "models" / "product"
-DEFAULT_MODEL_CACHE_DIR = DEFAULT_MODEL_ROOT / "ct2"
+DEFAULT_MODEL_CACHE_DIR = BASE_DIR / "assets" / "models" / "product_ct2"
+
+ACRONYMS_PATH = BASE_DIR / "assets" / "acronyms.xlsx"
 
 
 def _read_bool_env(name: str, default: bool) -> bool:
@@ -36,8 +37,6 @@ LOCAL_FILES_ONLY = _read_bool_env("PRODUCT_LOCAL_FILES_ONLY", False)
 PRELOAD_ON_STARTUP = True
 RUN_MODE = os.getenv("PRODUCT_RUN_MODE", "interactive")
 SINGLE_TEXT = os.getenv("PRODUCT_SINGLE_TEXT", "We need backup now.")
-API_HOST = os.getenv("PRODUCT_API_HOST", "0.0.0.0")
-API_PORT = int(os.getenv("PRODUCT_API_PORT", "8080"))
 
 
 @dataclass(frozen=True)
@@ -115,8 +114,8 @@ OPUS_MODELS: dict[tuple[str, str], dict[str, str | bool]] = {
         "use_target_tag": True,
     },
     ("nob", "en"): {
-        "model_id": "opus-mt-tc-big-gmq-en",
-        "model_path": "Helsinki-NLP/opus-mt-tc-big-gmq-en",
+        "model_id": "opus-tc-big-nob-en-military",
+        "model_path": "MariusBerg/opus-tc-big-nob-en-military",
         "use_target_tag": False,
     },
     ("nno", "en"): {
@@ -125,13 +124,13 @@ OPUS_MODELS: dict[tuple[str, str], dict[str, str | bool]] = {
         "use_target_tag": False,
     },
     ("de", "en"): {
-        "model_id": "opus-mt-de-en",
-        "model_path": "Helsinki-NLP/opus-mt-de-en",
+        "model_id": "opus-tc-big-de-en-military",
+        "model_path": "MariusBerg/opus-tc-big-de-en-military",
         "use_target_tag": False,
     },
     ("pt", "en"): {
-        "model_id": "opus-mt-ROMANCE-en",
-        "model_path": "Helsinki-NLP/opus-mt-ROMANCE-en",
+        "model_id": "opus-tc-big-pt-en-military",
+        "model_path": "MariusBerg/opus-tc-big-pt-en-military",
         "use_target_tag": False,
     },
 }
@@ -154,7 +153,7 @@ def _normalize_lang(code: str) -> str:
     return LANGUAGE_ALIASES.get(normalized, normalized)
 
 
-def load_product_config() -> ProductModelConfig:
+def load_product_config(source_lang: str, target_lang: str) -> ProductModelConfig:
     """Load and validate product runtime configuration from environment.
 
     Returns
@@ -169,8 +168,8 @@ def load_product_config() -> ProductModelConfig:
     ValueError
         If the configured target language is not one of the product's known Opus models.
     """
-    source_lang = _normalize_lang(SOURCE_LANG)
-    target_lang = _normalize_lang(TARGET_LANG)
+    source_lang = _normalize_lang(source_lang)
+    target_lang = _normalize_lang(target_lang)
     pair = (source_lang, target_lang)
     if pair not in OPUS_MODELS:
         supported_pairs = ", ".join(f"{src}->{tgt}" for src, tgt in sorted(OPUS_MODELS))
@@ -195,28 +194,3 @@ def load_product_config() -> ProductModelConfig:
         local_files_only=LOCAL_FILES_ONLY,
         use_target_tag=bool(model_info["use_target_tag"]),
     )
-
-
-def list_product_configs() -> list[ProductModelConfig]:
-    """Return resolved configs for every supported product language pair."""
-    configs: list[ProductModelConfig] = []
-    for source_lang, target_lang in sorted(OPUS_MODELS):
-        model_info = OPUS_MODELS[(source_lang, target_lang)]
-        configs.append(
-            ProductModelConfig(
-                source_lang=source_lang,
-                target_lang=target_lang,
-                model_id=str(model_info["model_id"]),
-                model_path=str(model_info["model_path"]),
-                quantization=MODEL_QUANTIZATION,
-                device=DEVICE,
-                num_beams=NUM_BEAMS,
-                max_new_tokens=MAX_NEW_TOKENS,
-                num_threads=NUM_THREADS,
-                inter_threads=INTER_THREADS,
-                ct2_cache_dir=MODEL_CACHE_DIR,
-                local_files_only=LOCAL_FILES_ONLY,
-                use_target_tag=bool(model_info["use_target_tag"]),
-            )
-        )
-    return configs
