@@ -13,6 +13,15 @@ DEFAULT_MODEL_CACHE_DIR = BASE_DIR / "assets" / "models" / "product_ct2"
 
 ACRONYMS_PATH = BASE_DIR / "assets" / "acronyms.xlsx"
 
+
+def _read_bool_env(name: str, default: bool) -> bool:
+    """Parse a boolean environment variable with a safe default."""
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 SOURCE_LANG = os.getenv("PRODUCT_SOURCE_LANG", "en")
 TARGET_LANG = os.getenv("PRODUCT_TARGET_LANG", "nob")
 MODEL_QUANTIZATION = os.getenv("PRODUCT_MODEL_QUANTIZATION", "int8")
@@ -24,7 +33,7 @@ INTER_THREADS = 1
 MODEL_CACHE_DIR = Path(
     os.getenv("PRODUCT_MODEL_CACHE_DIR", str(DEFAULT_MODEL_CACHE_DIR))
 ).expanduser()
-LOCAL_FILES_ONLY = False
+LOCAL_FILES_ONLY = _read_bool_env("PRODUCT_LOCAL_FILES_ONLY", False)
 PRELOAD_ON_STARTUP = True
 RUN_MODE = os.getenv("PRODUCT_RUN_MODE", "interactive")
 SINGLE_TEXT = os.getenv("PRODUCT_SINGLE_TEXT", "We need backup now.")
@@ -105,8 +114,8 @@ OPUS_MODELS: dict[tuple[str, str], dict[str, str | bool]] = {
         "use_target_tag": True,
     },
     ("nob", "en"): {
-        "model_id": "opus-mt-tc-big-gmq-en",
-        "model_path": "Helsinki-NLP/opus-mt-tc-big-gmq-en",
+        "model_id": "opus-tc-big-nob-en-military",
+        "model_path": "MariusBerg/opus-tc-big-nob-en-military",
         "use_target_tag": False,
     },
     ("nno", "en"): {
@@ -115,13 +124,13 @@ OPUS_MODELS: dict[tuple[str, str], dict[str, str | bool]] = {
         "use_target_tag": False,
     },
     ("de", "en"): {
-        "model_id": "opus-mt-de-en",
-        "model_path": "Helsinki-NLP/opus-mt-de-en",
+        "model_id": "opus-tc-big-de-en-military",
+        "model_path": "MariusBerg/opus-tc-big-de-en-military",
         "use_target_tag": False,
     },
     ("pt", "en"): {
-        "model_id": "opus-mt-ROMANCE-en",
-        "model_path": "Helsinki-NLP/opus-mt-ROMANCE-en",
+        "model_id": "opus-tc-big-pt-en-military",
+        "model_path": "MariusBerg/opus-tc-big-pt-en-military",
         "use_target_tag": False,
     },
 }

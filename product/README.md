@@ -1,73 +1,33 @@
-# Product CLI Prototype
+# Product API
 
-Minimal Opus-only product prototype.
+Customer flow stays the same:
 
-## What it does
+- call `/initialize` to load the requested language pair into memory
+- call `/translate` after initialization
 
-- loads one Opus model at startup based on `PRODUCT_SOURCE_LANG` + `PRODUCT_TARGET_LANG`
-- reuses cached CT2 model if present
-- otherwise downloads from Hugging Face and converts once
-- runs an interactive stdin loop for translation
-
-## Supported language pairs
-
-- `en -> nob` (fine-tuned)
-- `en -> de` (fine-tuned)
-- `en -> pt` (fine-tuned)
-- `nob -> en` (base Opus `tc-big-gmq-en`)
-- `nno -> en` (base Opus `tc-big-gmq-en`)
-- `de -> en` (base Opus)
-- `pt -> en` (base Opus `ROMANCE-en`)
+The Docker build now downloads and converts all configured model artifacts into the image,
+so runtime initialization can load from local disk instead of downloading from Hugging Face.
 
 ## Build
 
 ```bash
-docker build -t translation-product-cli ./product
+docker build -t product-api ./product
 ```
 
-## Run interactively
+## Run
 
 ```bash
-docker run --rm -it \
-  -e PRODUCT_SOURCE_LANG=en \
-  -e PRODUCT_TARGET_LANG=nob \
-  -e PRODUCT_MODEL_QUANTIZATION=int8 \
-  -v translation_product_cache:/models \
-  translation-product-cli
+docker run --rm -p 8000:8000 product-api
 ```
-
-Then type sentences into the prompt.
 
 ## Example
 
 ```bash
-docker run --rm -it \
-  -e PRODUCT_SOURCE_LANG=en \
-  -e PRODUCT_TARGET_LANG=de \
-  -e PRODUCT_MODEL_QUANTIZATION=int8 \
-  -v translation_product_cache:/models \
-  translation-product-cli
+curl -X POST http://localhost:8000/initialize \
+  -H "Content-Type: application/json" \
+  -d '{"language":"nob"}'
+
+curl -X POST http://localhost:8000/translate \
+  -H "Content-Type: application/json" \
+  -d '{"sender":true,"text":"Hello world"}'
 ```
-
-## Reverse direction example
-
-```bash
-docker run --rm -it \
-  -e PRODUCT_SOURCE_LANG=de \
-  -e PRODUCT_TARGET_LANG=en \
-  -e PRODUCT_MODEL_QUANTIZATION=int8 \
-  -v translation_product_cache:/models \
-  translation-product-cli
-```
-
-## Notes
-
-- first startup can take a while because the model may need to be downloaded and converted
-- later runs reuse the mounted `/models` cache volume
-- `pt -> en` currently uses `Helsinki-NLP/opus-mt-ROMANCE-en` because a dedicated `pt -> en`
-  or `tc-big-pt -> en` Opus checkpoint was not available
-- use `Ctrl+D` or type `exit` to quit
-
-## Developement:
-
-- Run `pre-commit install` to get correct pre committer (Ruff)

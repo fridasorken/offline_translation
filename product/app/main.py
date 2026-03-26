@@ -29,11 +29,14 @@ def initialize(payload: InitializeRequest) -> dict[str, str]:
 
         try:
             df = pd.read_excel(ACRONYMS_PATH, sheet_name=language)
+            app.state.acronyms = build_acronym_map(dict(zip(df["acronym"], df["expansion"])))
         except ValueError:
-            raise ValueError(
-                f"No acronym sheet found for language '{language}' in {ACRONYMS_PATH.name}"
+            logger.warning(
+                "No acronym sheet found for language=%s in %s, using empty acronym map",
+                language,
+                ACRONYMS_PATH.name,
             )
-        app.state.acronyms = build_acronym_map(dict(zip(df["acronym"], df["expansion"])))
+            app.state.acronyms = {}
 
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
