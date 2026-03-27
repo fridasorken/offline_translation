@@ -18,16 +18,16 @@ logger = logging.getLogger("product")
 app = FastAPI(title="Offline Translation", version="0.1.0")
 
 
-@app.post("/initialize")
+@app.post("/initialize", summary="Initialize a language to load models into memory")
 def initialize(payload: InitializeRequest) -> dict[str, str]:
     """
     Initialize the application for a given language.
-    
-    This endpoint sets up the translation runtime and loads associated acronym 
-    mappings for the specified language. 
-    
+
+    This endpoint sets up the translation runtime and loads associated acronym
+    mappings for the specified language.
+
     If the given language is English, no translation runtime is created.
-    
+
     Acronym mappings are loaded from an Excel sheet matching the language code.
     If no sheet is found, an empty mapping is used.
 
@@ -45,14 +45,14 @@ def initialize(payload: InitializeRequest) -> dict[str, str]:
     ------
     HTTPException
         400: Invalid language or configuration error.
-        
+
     HTTPException
         503: Required file with acronyms not found.
-        
+
     HTTPException
         500: Unexpected internal error in initialization.
     """
-    
+
     language = payload.language.lower()
 
     try:
@@ -82,18 +82,22 @@ def initialize(payload: InitializeRequest) -> dict[str, str]:
     return {"status": "ok", "language": language}
 
 
-@app.post("/translate", response_model=TranslateResponse)
+@app.post(
+    "/translate",
+    response_model=TranslateResponse,
+    summary="Translate text based on loaded languages",
+)
 def translate(payload: TranslateRequest) -> TranslateResponse:
     """
     Translate text based on the configured language and direction of the message.
-    
+
     This endpoint translates text either to or from English depending on the request
     direction. It requires previously performed initialization with the `\initialize`
     endpoint.
-    
+
     If the configured language is English, no translation is performed and the
     input text is returned.
-    
+
     For outgoing messages, mapped acronyms are expanded before translation to work
     with translation models' capabilities.
 
@@ -112,14 +116,14 @@ def translate(payload: TranslateRequest) -> TranslateResponse:
     ------
     HTTPException
         409: Application not previously initialized.
-        
+
     HTTPException
         503: Translation backend is unavailable.
-        
+
     HTTPException
         500: Unexpected internal error during translation.
     """
-        
+
     if not hasattr(app.state, "input_language"):
         raise HTTPException(status_code=409, detail="Call /initialize first")
 
@@ -141,7 +145,9 @@ def translate(payload: TranslateRequest) -> TranslateResponse:
         ) from exc
     except Exception as exc:
         logger.exception(
-            "translate failed outgoing=%s input_lang=%s", payload.is_outgoing, app.state.input_language
+            "translate failed outgoing=%s input_lang=%s",
+            payload.is_outgoing,
+            app.state.input_language,
         )
         raise HTTPException(status_code=500, detail="Translation failed") from exc
 
