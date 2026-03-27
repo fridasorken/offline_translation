@@ -42,6 +42,12 @@ What this does:
 
 ## Language Initialization
 
+Supported language values for `/initialize`:
+
+- `nob`
+- `de`
+- `pt`
+
 Example with Norwegian:
 
 ```bash
@@ -58,7 +64,12 @@ Expected response:
 
 ## Translation
 
-Example where the host is the sender (i.e. translation happens from configured language to english):
+Direction is controlled by `sender`:
+
+- `sender: false` means `English -> initialized language`
+- `sender: true` means `initialized language -> English`
+
+Example after `{"language":"nob"}` where text is translated from Norwegian to English:
 
 ```bash
 curl -X POST http://localhost:8000/translate \
@@ -71,6 +82,34 @@ Expected response:
 ```bash
 {"translation":"Hello World!"}
 ```
+
+Example after `{"language":"nob"}` where text is translated from English to Norwegian:
+
+```bash
+curl -X POST http://localhost:8000/translate \
+  -H "Content-Type: application/json" \
+  -d '{"sender":false,"text":"Hello world!"}'
+```
+
+Expected response:
+
+```bash
+{"translation":"Hei verden!"}
+```
+
+## Re-Initialize To Switch Language
+
+Call `/initialize` again to switch to a different language pair.
+
+Example:
+
+```bash
+curl -X POST http://localhost:8000/initialize \
+  -H "Content-Type: application/json" \
+  -d '{"language":"de"}'
+```
+
+After that, `/translate` uses the German pair instead of the previously initialized language.
 
 ## Stop and clean-up
 
