@@ -1,6 +1,6 @@
 # OPUS Fine-Tuning Project
 
-This is a standalone fine-tuning project (separate from the runtime API in `src/eval_api`).
+This is a standalone fine-tuning project (separate from the runtime API in `evaluation/eval_api`).
 
 Everything is config-driven via:
 
