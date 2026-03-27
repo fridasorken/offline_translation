@@ -40,6 +40,8 @@ What this does:
 - Starts `product-api` service from [product/docker-compose.yml](product/docker-compose.yml)
 - Exposes API at http://localhost:8000
 
+OpenAPI UI is available at http://localhost:8000/docs where you can inspect and interact with the API.
+
 ## Language Initialization
 
 Supported language values for `/initialize`:
