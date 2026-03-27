@@ -64,17 +64,17 @@ Expected response:
 
 ## Translation
 
-Direction is controlled by `sender`:
+Direction is controlled by `is_outgoing`:
 
-- `sender: false` means `English -> initialized language`
-- `sender: true` means `initialized language -> English`
+- `is_outgoing: false` means `English -> initialized language`
+- `is_outgoing: true` means `initialized language -> English`
 
 Example after `{"language":"nob"}` where text is translated from Norwegian to English:
 
 ```bash
 curl -X POST http://localhost:8000/translate \
   -H "Content-Type: application/json" \
-  -d '{"sender":true,"text":"Hallo verden!"}'
+  -d '{"is_outgoing":true,"text":"Hallo verden!"}'
 ```
 
 Expected response:
@@ -88,7 +88,7 @@ Example after `{"language":"nob"}` where text is translated from English to Norw
 ```bash
 curl -X POST http://localhost:8000/translate \
   -H "Content-Type: application/json" \
-  -d '{"sender":false,"text":"Hello world!"}'
+  -d '{"is_outgoing":false,"text":"Hello world!"}'
 ```
 
 Expected response:
