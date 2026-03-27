@@ -8,26 +8,113 @@ Customer flow stays the same:
 The Docker build now downloads and converts all configured model artifacts into the image,
 so runtime initialization can load from local disk instead of downloading from Hugging Face.
 
-## Build
+Implementation entrypoints:
+- API app: [`app.main`](app/main.py)
+- Container start command: [main.py](main.py)
+- Image build config: [Dockerfile](Dockerfile)
+- Compose service config: [docker-compose.yml](docker-compose.yml)
+
+## Prerequisites
+
+- Docker + Docker Compose plugin installed.
+- Port `8000` available on host.
+
+Check installation:
 
 ```bash
-docker build -t product-api ./product
+docker --version
+docker compose version
 ```
 
-## Run
+## Run the API
+
+From repository root:
 
 ```bash
-docker run --rm -p 8000:8000 product-api
+cd product
+docker compose up --build
 ```
 
-## Example
+What this does:
+- Builds image from [product/Dockerfile](product/Dockerfile), which includes downloading the translation models from HuggingFace
+- Starts `product-api` service from [product/docker-compose.yml](product/docker-compose.yml)
+- Exposes API at http://localhost:8000
+
+## Language Initialization
+
+Supported language values for `/initialize`:
+
+- `nob`
+- `de`
+- `pt`
+
+Example with Norwegian:
 
 ```bash
 curl -X POST http://localhost:8000/initialize \
   -H "Content-Type: application/json" \
   -d '{"language":"nob"}'
+```
 
+Expected response:
+
+```bash
+{"status":"ok","language":"nob"}
+```
+
+## Translation
+
+Direction is controlled by `sender`:
+
+- `sender: false` means `English -> initialized language`
+- `sender: true` means `initialized language -> English`
+
+Example after `{"language":"nob"}` where text is translated from Norwegian to English:
+
+```bash
 curl -X POST http://localhost:8000/translate \
   -H "Content-Type: application/json" \
-  -d '{"sender":true,"text":"Hello world"}'
+  -d '{"sender":true,"text":"Hallo verden!"}'
+```
+
+Expected response:
+
+```bash
+{"translation":"Hello World!"}
+```
+
+Example after `{"language":"nob"}` where text is translated from English to Norwegian:
+
+```bash
+curl -X POST http://localhost:8000/translate \
+  -H "Content-Type: application/json" \
+  -d '{"sender":false,"text":"Hello world!"}'
+```
+
+Expected response:
+
+```bash
+{"translation":"Hei verden!"}
+```
+
+## Re-Initialize To Switch Language
+
+Call `/initialize` again to switch to a different language pair.
+
+Example:
+
+```bash
+curl -X POST http://localhost:8000/initialize \
+  -H "Content-Type: application/json" \
+  -d '{"language":"de"}'
+```
+
+After that, `/translate` uses the German pair instead of the previously initialized language.
+
+## Stop and clean-up
+
+When finished, stop and remove the docker container using
+
+```bash
+docker compose down
 ```
