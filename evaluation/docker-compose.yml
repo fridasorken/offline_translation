@@ -1,7 +1,7 @@
 services:
   backend:
     build:
-      context: ./src/eval_api
+      context: ./eval_api
       dockerfile: Dockerfile
     container_name: translation-backend
     ports:
@@ -35,7 +35,7 @@ services:
 
   frontend:
     build:
-      context: ./src/frontend
+      context: ./frontend
       dockerfile: Dockerfile
     container_name: translation-frontend
     ports:
