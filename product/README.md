@@ -1,73 +1,120 @@
-# Product CLI Prototype
+# Product API
 
-Minimal Opus-only product prototype.
+Customer flow stays the same:
 
-## What it does
+- call `/initialize` to load the requested language pair into memory
+- call `/translate` after initialization
 
-- loads one Opus model at startup based on `PRODUCT_SOURCE_LANG` + `PRODUCT_TARGET_LANG`
-- reuses cached CT2 model if present
-- otherwise downloads from Hugging Face and converts once
-- runs an interactive stdin loop for translation
+The Docker build now downloads and converts all configured model artifacts into the image,
+so runtime initialization can load from local disk instead of downloading from Hugging Face.
 
-## Supported language pairs
+Implementation entrypoints:
+- API app: [`app.main`](app/main.py)
+- Container start command: [main.py](main.py)
+- Image build config: [Dockerfile](Dockerfile)
+- Compose service config: [docker-compose.yml](docker-compose.yml)
 
-- `en -> nob` (fine-tuned)
-- `en -> de` (fine-tuned)
-- `en -> pt` (fine-tuned)
-- `nob -> en` (base Opus `tc-big-gmq-en`)
-- `nno -> en` (base Opus `tc-big-gmq-en`)
-- `de -> en` (base Opus)
-- `pt -> en` (base Opus `ROMANCE-en`)
+## Prerequisites
 
-## Build
+- Docker + Docker Compose plugin installed.
+- Port `8000` available on host.
 
-```bash
-docker build -t translation-product-cli ./product
-```
-
-## Run interactively
+Check installation:
 
 ```bash
-docker run --rm -it \
-  -e PRODUCT_SOURCE_LANG=en \
-  -e PRODUCT_TARGET_LANG=nob \
-  -e PRODUCT_MODEL_QUANTIZATION=int8 \
-  -v translation_product_cache:/models \
-  translation-product-cli
+docker --version
+docker compose version
 ```
 
-Then type sentences into the prompt.
+## Run the API
 
-## Example
+From repository root:
 
 ```bash
-docker run --rm -it \
-  -e PRODUCT_SOURCE_LANG=en \
-  -e PRODUCT_TARGET_LANG=de \
-  -e PRODUCT_MODEL_QUANTIZATION=int8 \
-  -v translation_product_cache:/models \
-  translation-product-cli
+cd product
+docker compose up --build
 ```
 
-## Reverse direction example
+What this does:
+- Builds image from [product/Dockerfile](product/Dockerfile), which includes downloading the translation models from HuggingFace
+- Starts `product-api` service from [product/docker-compose.yml](product/docker-compose.yml)
+- Exposes API at http://localhost:8000
+
+## Language Initialization
+
+Supported language values for `/initialize`:
+
+- `nob`
+- `de`
+- `pt`
+
+Example with Norwegian:
 
 ```bash
-docker run --rm -it \
-  -e PRODUCT_SOURCE_LANG=de \
-  -e PRODUCT_TARGET_LANG=en \
-  -e PRODUCT_MODEL_QUANTIZATION=int8 \
-  -v translation_product_cache:/models \
-  translation-product-cli
+curl -X POST http://localhost:8000/initialize \
+  -H "Content-Type: application/json" \
+  -d '{"language":"nob"}'
 ```
 
-## Notes
+Expected response:
 
-- first startup can take a while because the model may need to be downloaded and converted
-- later runs reuse the mounted `/models` cache volume
-- `pt -> en` currently uses `Helsinki-NLP/opus-mt-ROMANCE-en` because a dedicated `pt -> en`
-  or `tc-big-pt -> en` Opus checkpoint was not available
-- use `Ctrl+D` or type `exit` to quit
+```bash
+{"status":"ok","language":"nob"}
+```
 
-## Developement:
+## Translation
 
-- Run `pre-commit install` to get correct pre committer (Ruff)
+Direction is controlled by `is_outgoing`:
+
+- `is_outgoing: false` means `English -> initialized language`
+- `is_outgoing: true` means `initialized language -> English`
+
+Example after `{"language":"nob"}` where text is translated from Norwegian to English:
+
+```bash
+curl -X POST http://localhost:8000/translate \
+  -H "Content-Type: application/json" \
+  -d '{"is_outgoing":true,"text":"Hallo verden!"}'
+```
+
+Expected response:
+
+```bash
+{"translation":"Hello World!"}
+```
+
+Example after `{"language":"nob"}` where text is translated from English to Norwegian:
+
+```bash
+curl -X POST http://localhost:8000/translate \
+  -H "Content-Type: application/json" \
+  -d '{"is_outgoing":false,"text":"Hello world!"}'
+```
+
+Expected response:
+
+```bash
+{"translation":"Hei verden!"}
+```
+
+## Re-Initialize To Switch Language
+
+Call `/initialize` again to switch to a different language pair.
+
+Example:
+
+```bash
+curl -X POST http://localhost:8000/initialize \
+  -H "Content-Type: application/json" \
+  -d '{"language":"de"}'
+```
+
+After that, `/translate` uses the German pair instead of the previously initialized language.
+
+## Stop and clean-up
+
+When finished, stop and remove the docker container using
+
+```bash
+docker compose down
+```
