@@ -20,6 +20,39 @@ app = FastAPI(title="Offline Translation", version="0.1.0")
 
 @app.post("/initialize")
 def initialize(payload: InitializeRequest) -> dict[str, str]:
+    """
+    Initialize the application for a given language.
+    
+    This endpoint sets up the translation runtime and loads associated acronym 
+    mappings for the specified language. 
+    
+    If the given language is English, no translation runtime is created.
+    
+    Acronym mappings are loaded from an Excel sheet matching the language code.
+    If no sheet is found, an empty mapping is used.
+
+    Parameters
+    ----------
+    payload : InitializeRequest
+        Request payload containing the target language code.
+
+    Returns
+    -------
+    dict of str to str
+        A dictionary containing the initialization status and language code.
+
+    Raises
+    ------
+    HTTPException
+        400: Invalid language or configuration error.
+        
+    HTTPException
+        503: Required file with acronyms not found.
+        
+    HTTPException
+        500: Unexpected internal error in initialization.
+    """
+    
     language = payload.language.lower()
 
     try:
@@ -51,6 +84,42 @@ def initialize(payload: InitializeRequest) -> dict[str, str]:
 
 @app.post("/translate", response_model=TranslateResponse)
 def translate(payload: TranslateRequest) -> TranslateResponse:
+    """
+    Translate text based on the configured language and direction of the message.
+    
+    This endpoint translates text either to or from English depending on the request
+    direction. It requires previously performed initialization with the `\initialize`
+    endpoint.
+    
+    If the configured language is English, no translation is performed and the
+    input text is returned.
+    
+    For outgoing messages, mapped acronyms are expanded before translation to work
+    with translation models' capabilities.
+
+    Parameters
+    ----------
+    payload : TranslateRequest
+        Request payload containing the text to translate and whether the message is
+        outgoing or incoming.
+
+    Returns
+    -------
+    TranslateResponse
+        Response payload containing the translated text.
+
+    Raises
+    ------
+    HTTPException
+        409: Application not previously initialized.
+        
+    HTTPException
+        503: Translation backend is unavailable.
+        
+    HTTPException
+        500: Unexpected internal error during translation.
+    """
+        
     if not hasattr(app.state, "input_language"):
         raise HTTPException(status_code=409, detail="Call /initialize first")
 
