@@ -40,6 +40,7 @@ class OpusTranslator:
         self._ensure_converted_model()
         self.translator = self._load_translator()
 
+
     def _resolve_ct2_model_dir(self) -> Path:
         """Resolve the cache directory for the converted CT2 model.
 
@@ -49,6 +50,7 @@ class OpusTranslator:
             Filesystem path where the converted CT2 model should live.
         """
         return self.config.ct2_cache_dir / self._slug(self.config.model_path)
+
 
     @staticmethod
     def _slug(value: str) -> str:
@@ -65,6 +67,7 @@ class OpusTranslator:
             Normalized string safe to use as a cache directory name.
         """
         return re.sub(r"[^a-zA-Z0-9_.-]+", "_", value)
+
 
     def _ensure_converted_model(self) -> None:
         """Ensure the configured model exists in CT2 format.
@@ -95,6 +98,7 @@ class OpusTranslator:
             force=True,
         )
 
+
     def _load_translator(self) -> ctranslate2.Translator:
         """Create the CTranslate2 translator for the converted model.
 
@@ -119,9 +123,11 @@ class OpusTranslator:
         )
         return ctranslate2.Translator(str(self.ct2_model_dir), **kwargs)
 
+
     def warmup(self) -> None:
         """Run one small translation to warm tokenizer and translator state."""
         self.translate("System warmup.")
+
 
     def translate(self, text: str) -> str:
         """Translate one input string using the configured product language pair.
