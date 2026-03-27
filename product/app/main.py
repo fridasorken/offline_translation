@@ -56,7 +56,7 @@ def translate(payload: TranslateRequest) -> TranslateResponse:
 
     text = payload.text.strip()
 
-    if payload.sender:
+    if payload.is_outgoing:
         text = parse_acronyms(text, app.state.acronyms)
 
     if app.state.input_language == "en":
@@ -64,7 +64,7 @@ def translate(payload: TranslateRequest) -> TranslateResponse:
 
     try:
         start = time.perf_counter()
-        translated_text = translate_message(app.state.translator, payload.sender, text)
+        translated_text = translate_message(app.state.translator, payload.is_outgoing, text)
         latency_ms = int((time.perf_counter() - start) * 1000)
     except (RuntimeError, OSError) as exc:
         raise HTTPException(
@@ -72,13 +72,13 @@ def translate(payload: TranslateRequest) -> TranslateResponse:
         ) from exc
     except Exception as exc:
         logger.exception(
-            "translate failed sender=%s input_lang=%s", payload.sender, app.state.input_language
+            "translate failed outgoing=%s input_lang=%s", payload.is_outgoing, app.state.input_language
         )
         raise HTTPException(status_code=500, detail="Translation failed") from exc
 
     logger.info(
-        "translate sender=%s input_lang=%s latency_ms=%d",
-        payload.sender,
+        "translate outgoing=%s input_lang=%s latency_ms=%d",
+        payload.is_outgoing,
         app.state.input_language,
         latency_ms,
     )

@@ -10,8 +10,8 @@ class TranslationRuntime:
         self.sender.warmup()
         self.receiver.warmup()
 
-    def resolve_direction(self, is_sender: bool) -> OpusTranslator:
-        if is_sender:
+    def for_direction(self, is_outgoing: bool) -> OpusTranslator:
+        if is_outgoing:
             return self.sender
         return self.receiver
 

@@ -8,7 +8,7 @@ class InitializeRequest(BaseModel):
 
 
 class TranslateRequest(BaseModel):
-    sender: bool
+    is_outgoing: bool
     text: NonEmptyStr
 
 
