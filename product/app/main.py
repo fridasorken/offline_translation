@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from app.config import ACRONYMS_PATH
 from app.schemas import InitializeRequest, TranslateRequest, TranslateResponse
 from app.services.acronym_service import build_acronym_map, parse_acronyms
-from app.services.inference_service import translate_message
+from app.services.translation_service import translate_message
 from app.services.initialization_service import load_translator
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
@@ -88,7 +88,7 @@ def translate(payload: TranslateRequest) -> TranslateResponse:
     Translate text based on the configured language and direction of the message.
     
     This endpoint translates text either to or from English depending on the request
-    direction. It requires previously performed initialization with the `\initialize`
+    direction. It requires previously performed initialization with the `/initialize`
     endpoint.
     
     If the configured language is English, no translation is performed and the
