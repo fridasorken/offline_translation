@@ -26,7 +26,9 @@ DEFAULT_CONFIG_PATH = BASE_DIR / "config" / "finetune_config.json"
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fine-tune an Opus MT model")
     parser.add_argument(
-        "--config", type=Path, default=DEFAULT_CONFIG_PATH,
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG_PATH,
         help="Path to finetune config JSON (default: finetune/config/finetune_config.json)",
     )
     return parser.parse_args()
@@ -75,51 +77,37 @@ def _find_last_checkpoint(output_dir: Path) -> str | None:
     return str(checkpoints[-1])
 
 
-def main() -> None:
-    args = _parse_args()
-    config_path = args.config
-    path_cfg, dataset_cfg, training_cfg = _load_config(config_path)
-
-    train_jsonl = _resolve_path(path_cfg["hf_train_jsonl"])
-    eval_jsonl = _resolve_path(path_cfg["hf_eval_jsonl"])
-    output_dir = _resolve_path(path_cfg["training_output_dir"])
-    best_model_dir = _resolve_path(path_cfg["best_model_dir"])
-    metrics_path = _resolve_path(path_cfg["training_metrics_json"])
-
-    source_lang = training_cfg["source_lang"]
-    target_lang = training_cfg["target_lang"]
-    use_target_prefix = bool(training_cfg.get("use_target_prefix", True))
-    target_prefix_template = str(training_cfg.get("target_prefix_template", ">>{target_lang}<< "))
-    disable_eval_during_training = bool(training_cfg.get("disable_eval_during_training", False))
-    skip_final_eval = bool(training_cfg.get("skip_final_eval", False))
-    model_ref = training_cfg["model_ref"]
-    local_files_only = bool(training_cfg.get("local_files_only", False))
-
-    max_source_length = int(dataset_cfg["max_source_length"])
-    max_target_length = int(dataset_cfg["max_target_length"])
-
+def _build_data_files(train_jsonl: Path, eval_jsonl: Path) -> tuple[dict[str, str], bool]:
     data_files = {"train": str(train_jsonl)}
     has_eval_dataset = eval_jsonl.exists() and eval_jsonl.stat().st_size > 0
     if has_eval_dataset:
         data_files["eval"] = str(eval_jsonl)
+    return data_files, has_eval_dataset
 
-    dataset = load_dataset("json", data_files=data_files)
 
-    tokenizer = AutoTokenizer.from_pretrained(model_ref, local_files_only=local_files_only)
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_ref, local_files_only=local_files_only)
-    # Some saved checkpoints can be loaded in fp16; AMP expects master weights in fp32.
-    # Casting here avoids GradScaler "Attempting to unscale FP16 gradients" failures.
-    train_dtype_set = {p.dtype for p in model.parameters() if p.requires_grad}
-    if torch.float16 in train_dtype_set:
-        model = model.float()
-        print("cast_model_to_fp32_for_training=true")
+def _cast_model_to_fp32_if_needed(model: AutoModelForSeq2SeqLM) -> bool:
+    train_dtypes = {parameter.dtype for parameter in model.parameters() if parameter.requires_grad}
+    if torch.float16 not in train_dtypes:
+        return False
+    model.float()
+    return True
 
+
+def _build_preprocess_fn(
+    tokenizer: AutoTokenizer,
+    use_target_prefix: bool,
+    target_prefix_template: str,
+    target_lang: str,
+    max_source_length: int,
+    max_target_length: int,
+):
     def preprocess(examples: dict) -> dict:
         if use_target_prefix:
             prefix = target_prefix_template.format(target_lang=target_lang)
             source_texts = [f"{prefix}{text}" for text in examples["source"]]
         else:
             source_texts = list(examples["source"])
+
         model_inputs = tokenizer(
             source_texts,
             max_length=max_source_length,
@@ -133,16 +121,17 @@ def main() -> None:
         model_inputs["labels"] = labels["input_ids"]
         return model_inputs
 
-    tokenized = dataset.map(preprocess, batched=True, remove_columns=dataset["train"].column_names)
-    data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
+    return preprocess
 
+
+def _build_compute_metrics_fn(tokenizer: AutoTokenizer):
     def compute_metrics(eval_preds: tuple[np.ndarray, np.ndarray]) -> dict[str, float]:
         predictions, labels = eval_preds
         if isinstance(predictions, tuple):
             predictions = predictions[0]
+
         predictions = np.asarray(predictions)
         labels = np.asarray(labels)
-
         if predictions.ndim == 3:
             predictions = np.argmax(predictions, axis=-1)
 
@@ -167,16 +156,34 @@ def main() -> None:
         ter = sacrebleu.corpus_ter(pred_text, [label_text]).score
         return {"bleu": float(bleu), "chrf": float(chrf), "ter": float(ter)}
 
+    return compute_metrics
+
+
+def _estimate_warmup_steps(
+    train_rows: int,
+    per_device_train_batch_size: int,
+    gradient_accumulation_steps: int,
+    num_train_epochs: float,
+    warmup_ratio: float,
+) -> int:
+    steps_per_epoch = max(
+        1,
+        int(np.ceil(train_rows / (per_device_train_batch_size * gradient_accumulation_steps))),
+    )
+    total_steps = int(np.ceil(steps_per_epoch * num_train_epochs))
+    return int(max(0.0, warmup_ratio) * total_steps)
+
+
+def _build_training_args(
+    training_cfg: dict,
+    output_dir: Path,
+    has_eval_dataset: bool,
+    disable_eval_during_training: bool,
+    warmup_steps: int,
+) -> Seq2SeqTrainingArguments:
     enable_during_training_eval = has_eval_dataset and not disable_eval_during_training
     evaluation_strategy = "steps" if enable_during_training_eval else "no"
     warmup_ratio = float(training_cfg.get("warmup_ratio", 0.0))
-    train_rows = max(1, len(tokenized["train"]))
-    per_device_bs = max(1, int(training_cfg["per_device_train_batch_size"]))
-    grad_accum = max(1, int(training_cfg["gradient_accumulation_steps"]))
-    epochs = max(1.0, float(training_cfg["num_train_epochs"]))
-    steps_per_epoch = max(1, int(np.ceil(train_rows / (per_device_bs * grad_accum))))
-    total_steps_est = int(np.ceil(steps_per_epoch * epochs))
-    warmup_steps_est = int(max(0.0, warmup_ratio) * total_steps_est)
 
     requested_args: dict[str, object] = {
         "output_dir": str(output_dir),
@@ -187,7 +194,7 @@ def main() -> None:
         "per_device_eval_batch_size": int(training_cfg["per_device_eval_batch_size"]),
         "gradient_accumulation_steps": int(training_cfg["gradient_accumulation_steps"]),
         "warmup_ratio": warmup_ratio,
-        "warmup_steps": warmup_steps_est,
+        "warmup_steps": warmup_steps,
         "weight_decay": float(training_cfg["weight_decay"]),
         "logging_steps": int(training_cfg["logging_steps"]),
         "save_steps": int(training_cfg["save_steps"]),
@@ -207,7 +214,6 @@ def main() -> None:
 
     supported_args = inspect.signature(Seq2SeqTrainingArguments.__init__).parameters
     if "warmup_steps" in supported_args:
-        # Prefer warmup_steps to avoid warmup_ratio deprecation warnings in newer transformers.
         requested_args.pop("warmup_ratio", None)
     elif "warmup_ratio" not in supported_args:
         requested_args.pop("warmup_ratio", None)
@@ -223,7 +229,72 @@ def main() -> None:
         for key, value in requested_args.items()
         if key in supported_args and value is not None
     }
-    training_args = Seq2SeqTrainingArguments(**training_kwargs)
+    return Seq2SeqTrainingArguments(**training_kwargs)
+
+
+def main() -> None:
+    args = _parse_args()
+    config_path = args.config
+    path_cfg, dataset_cfg, training_cfg = _load_config(config_path)
+
+    train_jsonl = _resolve_path(path_cfg["hf_train_jsonl"])
+    eval_jsonl = _resolve_path(path_cfg["hf_eval_jsonl"])
+    output_dir = _resolve_path(path_cfg["training_output_dir"])
+    best_model_dir = _resolve_path(path_cfg["best_model_dir"])
+    metrics_path = _resolve_path(path_cfg["training_metrics_json"])
+
+    source_lang = training_cfg["source_lang"]
+    target_lang = training_cfg["target_lang"]
+    use_target_prefix = bool(training_cfg.get("use_target_prefix", True))
+    target_prefix_template = str(training_cfg.get("target_prefix_template", ">>{target_lang}<< "))
+    disable_eval_during_training = bool(training_cfg.get("disable_eval_during_training", False))
+    skip_final_eval = bool(training_cfg.get("skip_final_eval", False))
+    model_ref = training_cfg["model_ref"]
+    local_files_only = bool(training_cfg.get("local_files_only", False))
+
+    max_source_length = int(dataset_cfg["max_source_length"])
+    max_target_length = int(dataset_cfg["max_target_length"])
+
+    data_files, has_eval_dataset = _build_data_files(train_jsonl, eval_jsonl)
+    dataset = load_dataset("json", data_files=data_files)
+
+    tokenizer = AutoTokenizer.from_pretrained(model_ref, local_files_only=local_files_only)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_ref, local_files_only=local_files_only)
+    if _cast_model_to_fp32_if_needed(model):
+        print("cast_model_to_fp32_for_training=true")
+
+    preprocess = _build_preprocess_fn(
+        tokenizer=tokenizer,
+        use_target_prefix=use_target_prefix,
+        target_prefix_template=target_prefix_template,
+        target_lang=target_lang,
+        max_source_length=max_source_length,
+        max_target_length=max_target_length,
+    )
+    tokenized = dataset.map(preprocess, batched=True, remove_columns=dataset["train"].column_names)
+    data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
+    compute_metrics = _build_compute_metrics_fn(tokenizer)
+
+    enable_during_training_eval = has_eval_dataset and not disable_eval_during_training
+    warmup_ratio = float(training_cfg.get("warmup_ratio", 0.0))
+    train_rows = max(1, len(tokenized["train"]))
+    per_device_bs = max(1, int(training_cfg["per_device_train_batch_size"]))
+    grad_accum = max(1, int(training_cfg["gradient_accumulation_steps"]))
+    epochs = max(1.0, float(training_cfg["num_train_epochs"]))
+    warmup_steps = _estimate_warmup_steps(
+        train_rows=train_rows,
+        per_device_train_batch_size=per_device_bs,
+        gradient_accumulation_steps=grad_accum,
+        num_train_epochs=epochs,
+        warmup_ratio=warmup_ratio,
+    )
+    training_args = _build_training_args(
+        training_cfg=training_cfg,
+        output_dir=output_dir,
+        has_eval_dataset=has_eval_dataset,
+        disable_eval_during_training=disable_eval_during_training,
+        warmup_steps=warmup_steps,
+    )
 
     trainer_kwargs: dict[str, object] = {
         "model": model,
@@ -254,14 +325,15 @@ def main() -> None:
     trainer.save_model(str(output_dir))
     tokenizer.save_pretrained(str(output_dir))
 
-    best_checkpoint = _copy_best_checkpoint(trainer, best_model_dir) if enable_during_training_eval else None
+    best_checkpoint = (
+        _copy_best_checkpoint(trainer, best_model_dir) if enable_during_training_eval else None
+    )
     if not enable_during_training_eval:
         if best_model_dir.exists():
             shutil.rmtree(best_model_dir)
         shutil.copytree(output_dir, best_model_dir)
         best_checkpoint = str(output_dir)
     elif not best_checkpoint:
-        # Fallback for short runs where no eval/save step is hit before training ends.
         if best_model_dir.exists():
             shutil.rmtree(best_model_dir)
         shutil.copytree(output_dir, best_model_dir)
@@ -285,7 +357,10 @@ def main() -> None:
         "eval_metrics": eval_metrics,
     }
     metrics_path.parent.mkdir(parents=True, exist_ok=True)
-    metrics_path.write_text(json.dumps(metrics_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    metrics_path.write_text(
+        json.dumps(metrics_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
     print(f"config_path={config_path}")
     print(f"model_ref={model_ref}")
