@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 
 from app.config import OPUS_MODELS, load_product_config
-from app.inference import OpusTranslator
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger("product-preload")
@@ -11,6 +10,8 @@ logger = logging.getLogger("product-preload")
 
 def main() -> None:
     """Download and convert all configured product models during image build."""
+    from app.inference import OpusTranslator
+
     seen_model_paths: set[str] = set()
 
     for source_lang, target_lang in sorted(OPUS_MODELS):
