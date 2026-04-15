@@ -2,7 +2,9 @@ name: Product Unit Tests
 
 on:
   push:
-    branches: [ chore/write-more-unit-tests ]
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   test-product:
