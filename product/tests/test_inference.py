@@ -223,3 +223,91 @@ def test_warmup_uses_static_probe_text(monkeypatch: pytest.MonkeyPatch) -> None:
     translator.warmup()
 
     assert seen_inputs == ["System warmup."]
+
+
+def test_init_loads_tokenizer_and_bootstraps_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    inference, calls, _ = load_inference_module(monkeypatch)
+
+    ensure_calls: list[object] = []
+    backend = object()
+
+    def fake_ensure(self) -> None:
+        ensure_calls.append(self)
+
+    def fake_load(self) -> object:
+        return backend
+
+    monkeypatch.setattr(inference.OpusTranslator, "_ensure_converted_model", fake_ensure)
+    monkeypatch.setattr(inference.OpusTranslator, "_load_translator", fake_load)
+
+    config = SimpleNamespace(
+        model_path="MariusBerg/opus-tc-big-en-de-military-v1",
+        local_files_only=True,
+        ct2_cache_dir=tmp_path,
+    )
+
+    translator = inference.OpusTranslator(config)
+
+    assert calls["tokenizer_load"] == (config.model_path, True)
+    assert translator.ct2_model_dir == tmp_path / inference.OpusTranslator._slug(config.model_path)
+    assert ensure_calls == [translator]
+    assert translator.translator is backend
+
+
+def test_load_translator_omits_intra_threads_when_num_threads_is_none(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    inference, calls, _ = load_inference_module(monkeypatch)
+    translator = inference.OpusTranslator.__new__(inference.OpusTranslator)
+    translator.ct2_model_dir = tmp_path / "ct2-cache"
+    translator.config = SimpleNamespace(
+        device="cpu",
+        quantization="int8",
+        inter_threads=3,
+        num_threads=None,
+    )
+
+    translator._load_translator()
+
+    _, kwargs = calls["translator_init"][0]
+    assert kwargs == {
+        "device": "cpu",
+        "compute_type": "default",
+        "inter_threads": 3,
+    }
+    assert "intra_threads" not in kwargs
+
+
+def test_translate_without_target_tag_uses_raw_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inference, _, tokenizer = load_inference_module(monkeypatch)
+    batch_calls: list[tuple[list[list[str]], int, int]] = []
+
+    class FakeLoadedTranslator:
+        def translate_batch(
+            self,
+            tokens: list[list[str]],
+            beam_size: int,
+            max_decoding_length: int,
+        ) -> list[SimpleNamespace]:
+            batch_calls.append((tokens, beam_size, max_decoding_length))
+            return [SimpleNamespace(hypotheses=[["hyp-1", "hyp-2"]])]
+
+    translator = inference.OpusTranslator.__new__(inference.OpusTranslator)
+    translator.config = SimpleNamespace(
+        use_target_tag=False,
+        target_lang="de",
+        num_beams=2,
+        max_new_tokens=16,
+    )
+    translator.tokenizer = tokenizer
+    translator.translator = FakeLoadedTranslator()
+
+    translated = translator.translate("Hold position")
+
+    assert tokenizer.encoded_inputs == ["Hold position"]
+    assert batch_calls == [([["src-1", "src-2"]], 2, 16)]
+    assert translated == "decoded text"
