@@ -1,15 +1,21 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from app.config import load_product_config
-from app.inference import OpusTranslator
+
+if TYPE_CHECKING:
+    from app.inference import OpusTranslator
 
 
 class TranslationRuntime:
     """
     Runtime container for bidirectional translation between user language and English.
 
-    This class initializes two translation models: 
-    one for translating outgoing messages to English, and one for translating 
-    incoming messages from English back to user language. 
-    
+    This class initializes two translation models:
+    one for translating outgoing messages to English, and one for translating
+    incoming messages from English back to user language.
+
     Both models are warmed up on initialization to keep latency consistent from first translation.
 
     Parameters
@@ -26,8 +32,13 @@ class TranslationRuntime:
     receiver : OpusTranslator
         Translator used for incoming messages. Translates from English to the target language.
     """
-    
+
+    sender: "OpusTranslator"
+    receiver: "OpusTranslator"
+
     def __init__(self, language: str) -> None:
+        from app.inference import OpusTranslator
+
         self.sender = OpusTranslator(load_product_config(source_lang=language, target_lang="en"))
         self.receiver = OpusTranslator(load_product_config(source_lang="en", target_lang=language))
 
@@ -49,7 +60,7 @@ class TranslationRuntime:
         OpusTranslator
             The translator for the specified direction.
         """
-              
+
         if is_outgoing:
             return self.sender
         return self.receiver
@@ -57,19 +68,20 @@ class TranslationRuntime:
 
 def load_translator(language: str) -> TranslationRuntime:
     """
-    Creates a runtime container for bidirectional translation between the given user language and English.
+    Creates a runtime container for bidirectional translation between the given
+    user language and English.
 
     Parameters
     ----------
     language : str
         The target language code. This language is used as the source language
         for outgoing translations (to English) and as the target language for
-        incoming translations (from English). 
+        incoming translations (from English).
 
     Returns
     -------
     TranslationRuntime
         The set of machine translation models configured to the given user language.
     """
-    
+
     return TranslationRuntime(language=language)

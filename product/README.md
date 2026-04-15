@@ -42,6 +42,18 @@ What this does:
 
 OpenAPI UI is available at http://localhost:8000/docs where you can inspect and interact with the API.
 
+## Run Tests
+
+From `product/`:
+
+```bash
+uv sync --extra dev
+uv run pytest
+```
+
+The automated test suite isolates the API and service layers with mocks, so it does
+not download or convert translation models during test runs.
+
 ## Language Initialization
 
 Supported language values for `/initialize`:
