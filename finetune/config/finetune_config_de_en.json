@@ -1,0 +1,52 @@
+{
+  "ids": {
+    "batch_id": 1
+  },
+  "paths": {
+    "raw_generated_jsonl": "./data/opus_de_en_train.jsonl",
+    "fixed_ids_jsonl": "./data/unused",
+    "malformed_lines_log": "./results/unused",
+    "train_ready_jsonl": "./data/opus_de_en_train.jsonl",
+    "train_ready_report_json": "./results/unused",
+    "hf_train_jsonl": "./data/opus_de_en_hf_train.jsonl",
+    "hf_eval_jsonl": "./data/opus_de_en_hf_eval.jsonl",
+    "hf_test_jsonl": "./data/opus_de_en_hf_test.jsonl",
+    "split_report_json": "./results/opus_de_en_split_report.json",
+    "training_output_dir": "./outputs/opus_de_en_ft",
+    "best_model_dir": "./outputs/opus_de_en_ft_best",
+    "training_metrics_json": "./results/opus_de_en_ft_metrics.json",
+    "benchmark_output_json": "./results/opus_de_en_test_comet_comparison.json"
+  },
+  "dataset": {
+    "random_seed": 42,
+    "eval_ratio": 0.1,
+    "test_ratio": 0.1,
+    "max_source_length": 192,
+    "max_target_length": 192
+  },
+  "training": {
+    "model_ref": "Helsinki-NLP/opus-mt-de-en",
+    "source_lang": "de",
+    "target_lang": "en",
+    "use_target_prefix": false,
+    "disable_eval_during_training": true,
+    "skip_final_eval": true,
+    "local_files_only": false,
+    "learning_rate": 2e-06,
+    "num_train_epochs": 0.8,
+    "per_device_train_batch_size": 8,
+    "per_device_eval_batch_size": 8,
+    "gradient_accumulation_steps": 2,
+    "warmup_ratio": 0.05,
+    "weight_decay": 0.01,
+    "logging_steps": 50,
+    "eval_steps": 300,
+    "save_steps": 300,
+    "save_total_limit": 2,
+    "num_beams_eval": 4,
+    "fp16": false,
+    "bf16": false,
+    "gradient_checkpointing": true,
+    "dataloader_num_workers": 0
+  }
+}
