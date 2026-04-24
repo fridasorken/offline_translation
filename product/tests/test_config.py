@@ -1,6 +1,14 @@
 import pytest
 
-from app.config import MODEL_CACHE_DIR, _normalize_lang, _read_bool_env, load_product_config
+from app.config import (
+    ALLOW_REINITIALIZE,
+    API_HOST,
+    MODEL_CACHE_DIR,
+    _normalize_lang,
+    _read_bool_env,
+    _read_int_env,
+    load_product_config,
+)
 
 
 @pytest.mark.parametrize(
@@ -57,3 +65,24 @@ def test_read_bool_env_returns_default_when_unset(monkeypatch: pytest.MonkeyPatc
 
     assert _read_bool_env("TEST_BOOL_ENV", default=True) is True
     assert _read_bool_env("TEST_BOOL_ENV", default=False) is False
+
+
+def test_api_host_defaults_to_localhost() -> None:
+    assert API_HOST == "127.0.0.1"
+
+
+def test_reinitialize_defaults_to_enabled() -> None:
+    assert ALLOW_REINITIALIZE is True
+
+
+def test_read_int_env_parses_integer(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEST_INT_ENV", "42")
+
+    assert _read_int_env("TEST_INT_ENV", default=1, minimum=1) == 42
+
+
+def test_read_int_env_validates_minimum(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEST_INT_ENV", "0")
+
+    with pytest.raises(ValueError, match="TEST_INT_ENV must be at least 1"):
+        _read_int_env("TEST_INT_ENV", default=1, minimum=1)

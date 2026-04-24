@@ -22,6 +22,28 @@ def _read_bool_env(name: str, default: bool) -> bool:
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _read_int_env(name: str, default: int, minimum: int | None = None) -> int:
+    """Parse an integer environment variable with optional lower bound validation."""
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}")
+
+    return value
+
+
+API_HOST = os.getenv("PRODUCT_API_HOST", "127.0.0.1")
+API_PORT = _read_int_env("PRODUCT_API_PORT", 8000, minimum=1)
+MAX_LANGUAGE_CODE_CHARS = _read_int_env("PRODUCT_MAX_LANGUAGE_CODE_CHARS", 16, minimum=1)
+MAX_TRANSLATION_CHARS = _read_int_env("PRODUCT_MAX_TRANSLATION_CHARS", 2000, minimum=1)
+ALLOW_REINITIALIZE = _read_bool_env("PRODUCT_ALLOW_REINITIALIZE", True)
 SOURCE_LANG = os.getenv("PRODUCT_SOURCE_LANG", "en")
 TARGET_LANG = os.getenv("PRODUCT_TARGET_LANG", "nob")
 MODEL_QUANTIZATION = os.getenv("PRODUCT_MODEL_QUANTIZATION", "int8")

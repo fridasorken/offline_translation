@@ -4,6 +4,7 @@ Customer flow stays the same:
 
 - call `/initialize` to load the requested language pair into memory
 - call `/translate` after initialization
+- call `/initialize` again to switch the active language
 
 The Docker build now downloads and converts all configured model artifacts into the image,
 so runtime initialization can load from local disk instead of downloading from Hugging Face.
@@ -38,9 +39,18 @@ docker compose up --build
 What this does:
 - Builds image from [product/Dockerfile](product/Dockerfile), which includes downloading the translation models from HuggingFace
 - Starts `product-api` service from [product/docker-compose.yml](product/docker-compose.yml)
-- Exposes API at http://localhost:8000
+- Exposes API only on the host machine at http://localhost:8000
 
 OpenAPI UI is available at http://localhost:8000/docs where you can inspect and interact with the API.
+
+## Demo Safety Defaults
+
+The product API is configured for a local demonstrator setup:
+
+- Docker Compose binds the host port to `127.0.0.1`.
+- Translation input is limited by `PRODUCT_MAX_TRANSLATION_CHARS` (default `2000`).
+- Translation and initialization requests use a single in-process lock.
+- Re-initialization is enabled by default with `PRODUCT_ALLOW_REINITIALIZE=true`.
 
 ## Run Tests
 
@@ -113,9 +123,9 @@ Expected response:
 
 ## Re-Initialize To Switch Language
 
-Call `/initialize` again to switch to a different language pair.
-
-Example:
+Call `/initialize` again to switch to a different language pair. The service only runs
+one translation or initialization at a time, so it will not switch languages in the
+middle of an active translation.
 
 ```bash
 curl -X POST http://localhost:8000/initialize \
