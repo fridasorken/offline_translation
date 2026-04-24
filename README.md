@@ -19,4 +19,4 @@ Monorepo for two related translation services plus tooling:
   - Detailed docs: [evaluation/frontend/README.md](evaluation/frontend/README.md)
 - Fine-tuning: [finetune/](finetune/)  
   - Detailed docs: [finetune/README.md](finetune/README.md)
-- Integration tests: [tests/test_integration.sh](tests/test_integration.sh)
+- Integration tests: [evaluation/test_integration.sh](evaluation/test_integration.sh)
